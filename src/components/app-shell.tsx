@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Blocks, BookOpenCheck, FileCode2, GitBranch, Hospital, LayoutDashboard, Loader2, Menu, Network, Radio, ScrollText, ShieldCheck, Users, X,
+  Blocks, BookOpenCheck, FileCode2, GitBranch, Hospital, LayoutDashboard, Loader2, Menu, Network, Radio, Workflow, ScrollText, ShieldCheck, Users, X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -13,7 +13,8 @@ import { StoreProvider, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export const NAV = [
-  { href: "/", label: "Guided Demonstration", icon: BookOpenCheck },
+  { href: "/", label: "Request Workflow", icon: Workflow },
+  { href: "/guided", label: "Guided Demonstration", icon: BookOpenCheck },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/patient", label: "Patient Portal", icon: Users },
   { href: "/requests", label: "Hospital Requests", icon: Hospital },

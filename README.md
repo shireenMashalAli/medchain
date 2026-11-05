@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 (Node.js 20.9+). State is saved in `localStorage`; **Reset Demo Data** on the ledger page restores the initial data.
+Open http://localhost:3000 (Node.js 20.9+). The landing page, **Request Workflow**, walks one request through every step on a single page with the live ledger beside it. State is saved in `localStorage`; **Reset Demo Data** on the ledger page restores the initial data.
 
 ## Layout
 

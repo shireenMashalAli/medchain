@@ -140,7 +140,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex-row items-center justify-between"><CardTitle>Recent requests</CardTitle><Link href="/requests?tab=all" className="text-xs text-teal-700 hover:underline">All requests</Link></CardHeader>
           <CardContent className="space-y-2">
-            {reqs.length === 0 && <div className="text-sm text-slate-500">No requests yet. Start with the <Link className="text-teal-700 underline" href="/">Guided Demonstration</Link>.</div>}
+            {reqs.length === 0 && <div className="text-sm text-slate-500">No requests yet. Start with the <Link className="text-teal-700 underline" href="/">Request Workflow</Link>.</div>}
             {reqs.slice(0, 6).map((r) => (
               <Link key={r.id} href={`/requests/${r.id}`} className="flex items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50">
                 <div className="text-sm">
