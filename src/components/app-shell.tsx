@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Blocks, BookOpenCheck, FileCode2, GitBranch, Hospital, LayoutDashboard, Loader2, Menu, Network, Radio, Workflow, ScrollText, ShieldCheck, Users, X,
+  FileCode2, Loader2, Menu, Radio, Workflow, ScrollText, ShieldCheck, Users, X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -12,18 +12,12 @@ import { SessionSelector } from "@/components/session-selector";
 import { StoreProvider, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+// Only the screens the assignment needs. Other demo pages remain in the code but are not in the menu.
 export const NAV = [
   { href: "/", label: "Request Workflow", icon: Workflow },
-  { href: "/guided", label: "Guided Demonstration", icon: BookOpenCheck },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/patient", label: "Patient Portal", icon: Users },
-  { href: "/requests", label: "Hospital Requests", icon: Hospital },
-  { href: "/contracts", label: "Contract Studio", icon: FileCode2 },
-  { href: "/pbft", label: "PBFT Network", icon: Network },
-  { href: "/governance", label: "Governance", icon: GitBranch },
-  { href: "/ledger", label: "Transaction & Audit Ledger", icon: ScrollText },
-  { href: "/network", label: "Network & Identities", icon: ShieldCheck },
-  { href: "/merkle", label: "Merkle Audit Proofs", icon: Blocks },
+  { href: "/contracts", label: "Smart Contract Studio", icon: FileCode2 },
+  { href: "/ledger", label: "Transaction Ledger", icon: ScrollText },
 ];
 
 function ActiveNavList({ onNavigate }: { onNavigate?: () => void }) {
@@ -72,7 +66,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <ActiveNavList onNavigate={onNavigate} />
       </Suspense>
       <div className="m-3 rounded-md border border-white/10 p-3 text-[11px] leading-relaxed text-slate-400">
-        Academic demonstration. Blockchain, PBFT and deployment are simulated in your browser. All patient data is synthetic.
+        Academic demonstration. The blockchain and contract deployment are simulated in your browser. All patient data is synthetic.
       </div>
     </nav>
   );

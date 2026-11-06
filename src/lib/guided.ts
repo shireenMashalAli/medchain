@@ -38,7 +38,6 @@ export const SCENARIOS: Scenario[] = [
   { id: "4", title: "Revoked consent", summary: "The patient grants consent, then revokes it before the request.", expected: "Denied by Rule 3 (revoked)", consent: BASE_CONSENT, revokeAfterGrant: true, request: BASE_REQUEST },
   { id: "5", title: "Expired consent", summary: "Consent is granted for 7 days, then the demo clock moves 8 days ahead.", expected: "Denied by Rule 3 (expired)", consent: { ...BASE_CONSENT, expiryDays: 7 }, expireAfterGrant: true, request: BASE_REQUEST },
   { id: "6", title: "Ledger tampering", summary: "A valid request completes, then someone edits a stored ledger event.", expected: "Hash verification fails at the altered event", consent: BASE_CONSENT, request: BASE_REQUEST, tamperLedger: true },
-  { id: "7", title: "One PBFT node offline", summary: "A valid ECG request while Medical Centre (H3) is offline.", expected: "3 of 4 nodes still commit; records released", consent: BASE_CONSENT, request: BASE_REQUEST, offlineNode: "H3" },
 ];
 
 export const GLOSSARY: Record<string, string> = {
@@ -184,23 +183,13 @@ export const STAGES: Stage[] = [
     },
   },
   {
-    title: "Consensus and medical record release",
-    actor: "Validators H1–H4 (simulated PBFT) and the records officer",
-    explain: "Releasing first commits the approval through consensus: 3 of 4 hospital validators must agree. Then only the permitted record categories are released and the final access decision is recorded.",
-    concepts: ["PBFT", "Hash", "Ledger entry"],
-    run: async (api, sc) => {
-      const state = api.getState();
-      for (const v of ["H1", "H2", "H3", "H4"] as ValidatorId[]) {
-        const target = sc.offlineNode === v ? "OFFLINE" : "ONLINE";
-        if (state.nodeStatus[v] !== target) await api.actions.setNodeStatus(v, target);
-      }
-      try {
-        const recs = await api.actions.releaseRecords(req(api).id);
-        const run = api.getState().pbftRuns.find((x) => x.id === req(api).pbftRunIds[0])!;
-        return { ok: true, note: `${run.committedCount}/4 validators committed${sc.offlineNode ? ` (${sc.offlineNode} offline)` : ""} in block ${run.blockId}. Released ${recs.map((r) => r.title).join(", ") || "no matching records"}.`, patch: { pbftRunId: run.id } };
-      } catch (e) {
-        return { ok: false, note: e instanceof Error ? e.message : String(e), patch: { pbftRunId: req(api).pbftRunIds[0] ?? null } };
-      }
+    title: "Medical record release",
+    actor: "Records Officer — Sara Malik (H2)",
+    explain: "With the contract passed and the hospital's approval, only the permitted record categories are released and the access decision is recorded.",
+    concepts: ["Ledger entry"],
+    run: async (api) => {
+      const recs = await api.actions.releaseRecords(req(api).id);
+      return { ok: true, note: `Released ${recs.map((r) => r.title).join(", ") || "no matching records"} to the requesting hospital.` };
     },
   },
   {
@@ -225,10 +214,10 @@ export const STAGES: Stage[] = [
       let tampered = "";
       if (sc.tamperLedger) {
         if (api.getState().tamper) await api.actions.restoreTamper();
-        const target = [...api.getState().ledger].reverse().find((e) => e.requestId === api.getState().guided.requestId && e.action === "FINAL_DECISION");
+        const target = [...api.getState().ledger].reverse().find((e) => e.requestId === api.getState().guided.requestId && e.action === "MEDICAL_RECORD_RELEASED");
         if (target) {
           await api.actions.tamperEvent(target.id);
-          tampered = ` ${target.id} (FINAL_DECISION) was edited in storage to "${api.getState().ledger[target.index].result}" without re-hashing.`;
+          tampered = ` ${target.id} (MEDICAL_RECORD_RELEASED) was edited in storage to "${api.getState().ledger[target.index].result}" without re-hashing.`;
         }
       }
       const v = await api.actions.verifyLedger();

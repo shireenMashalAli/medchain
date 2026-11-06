@@ -185,41 +185,24 @@ function startExecution(d: AppState, ctx: Ctx, req: DataRequest) {
   setStatus(req, "CONTRACT_PENDING", ctx.session.name, ev.id);
 }
 
-// Records the final outcome, the release/withholding of records, and the patient notification.
-function finalize(d: AppState, ctx: Ctx, req: DataRequest, outcome: FinalDecision["outcome"], reason: string, by: Actor, blockId?: string) {
-  const patient = d.patients.find((p) => p.id === req.patientId)!;
-  const base = { requestId: req.id, txId: req.txRef, blockId: blockId ?? null };
+// Records the final access decision. Only a RELEASED outcome releases records.
+function finalize(d: AppState, ctx: Ctx, req: DataRequest, outcome: FinalDecision["outcome"], reason: string, by: Actor) {
+  const base = { requestId: req.id, txId: req.txRef, actor: by };
+  let last: LedgerEvent;
   if (outcome === "RELEASED") {
     const recs = d.records.filter((r) => r.patientId === req.patientId && r.hospitalId === req.sourceHospitalId && req.categories.includes(r.category));
     req.releasedRecordIds = recs.map((r) => r.id);
-    ctx.recordLedgerEvent({
-      ...base, actor: by, action: "ACCESS_GRANTED", result: "GRANTED",
-      explanation: "Access granted: all three contract rules passed, consensus committed the decision, and the source hospital gave final approval.",
-    });
-    ctx.recordLedgerEvent({
-      ...base, actor: by, hospitalId: req.sourceHospitalId, action: "MEDICAL_RECORD_RELEASED", result: recs.length ? "RELEASED" : "NO_MATCHING_RECORDS",
-      explanation: recs.length ? `${recs.length} record(s) in the approved categories (${req.categories.join(", ")}) were released from ${req.sourceHospitalId} to ${req.requestingHospitalId}.` : `No records in the approved categories are held by ${req.sourceHospitalId}.`,
-      details: { records: recs.map((r) => `${r.id} (${r.category})`), to: req.requestingHospitalId },
+    ctx.recordLedgerEvent({ ...base, action: "ACCESS_GRANTED", result: "GRANTED", explanation: "Access granted: all three contract rules passed and the source hospital approved." });
+    last = ctx.recordLedgerEvent({
+      ...base, hospitalId: req.sourceHospitalId, action: "MEDICAL_RECORD_RELEASED", result: recs.length ? "RELEASED" : "NO_MATCHING_RECORDS",
+      explanation: recs.length ? `Released ${recs.map((r) => `${r.id} (${r.category})`).join(", ")} from ${req.sourceHospitalId} to ${req.requestingHospitalId}. Nothing outside the approved categories was released.` : `${req.sourceHospitalId} holds no records in the approved categories.`,
+      details: { records: recs.map((r) => r.id), to: req.requestingHospitalId },
     });
   } else {
-    ctx.recordLedgerEvent({ ...base, actor: by, action: "ACCESS_DENIED", result: "DENIED", explanation: `Access denied. ${reason}` });
-    ctx.recordLedgerEvent({
-      ...base, actor: by, hospitalId: req.sourceHospitalId, action: "MEDICAL_RECORD_WITHHELD", result: "WITHHELD",
-      explanation: `No medical records were released for ${req.id}.`, details: { reason },
-    });
+    last = ctx.recordLedgerEvent({ ...base, action: "ACCESS_DENIED", result: "DENIED", explanation: `Access denied. ${reason} No medical records were released.`, details: { reason } });
   }
-  const fin = ctx.recordLedgerEvent({
-    ...base, actor: by, action: "FINAL_DECISION", result: outcome,
-    explanation: outcome === "RELEASED" ? "Final decision: records released to the requesting hospital." : `Final decision: ${outcome.toLowerCase()}. ${reason}`,
-    details: { reason },
-  });
-  req.finalDecision = { outcome, reason, by: by.name, at: fin.timestamp, eventId: fin.id };
-  ctx.recordLedgerEvent({
-    ...base, actor: CONSORTIUM_ACTOR, action: "PATIENT_NOTIFIED", result: "DELIVERED",
-    explanation: `${patient.name} was notified that ${req.requestingHospitalId} requested ${req.categories.join(", ")} and the outcome was ${outcome}.`,
-    details: { patientId: patient.id, outcome },
-  });
-  setStatus(req, outcome === "RELEASED" ? "RELEASED" : outcome === "REJECTED" ? "REJECTED" : "DENIED", by.name, fin.id);
+  req.finalDecision = { outcome, reason, by: by.name, at: last.timestamp, eventId: last.id };
+  setStatus(req, outcome === "RELEASED" ? "RELEASED" : outcome === "REJECTED" ? "REJECTED" : "DENIED", by.name, last.id);
 }
 
 // Writes one rule evaluation to the request and the ledger, and settles the contract decision when reached.
@@ -253,7 +236,7 @@ function recordRule(d: AppState, ctx: Ctx, req: DataRequest, outcome: RuleOutcom
       req.decision = "APPROVE";
       const dec = ctx.recordLedgerEvent({
         actor: CONTRACT_ACTOR, hospitalId: req.sourceHospitalId, requestId: req.id, txId: req.txRef, action: "CONTRACT_APPROVED", result: "APPROVE",
-        explanation: "check() returned APPROVE: all three fixed rules passed. The source hospital must now approve or reject; records are released only after that and consensus.",
+        explanation: "check() returned APPROVE: all three fixed rules passed. The source hospital must now approve or reject.",
         details: { flaggedForReview: !!ext },
       });
       setStatus(req, "CONTRACT_APPROVED", "Smart contract", dec.id);
@@ -338,29 +321,22 @@ async function initialiseState(): Promise<AppState> {
   const ctx = makeCtx(draft);
   const c = { actor: CONSORTIUM_ACTOR };
   ctx.recordLedgerEvent({ ...c, action: "LEDGER_GENESIS", result: "OK", explanation: "Genesis event. Its previousHash is 64 zeros; every later event links to the one before it." });
-  ctx.recordLedgerEvent({ ...c, action: "NETWORK_INITIALISED", result: "OK", explanation: "Hospital registry loaded: H1–H4 are active validators; H5 External Hospital is not registered.", details: { hospitals: draft.hospitals.map((h) => `${h.id} ${h.name} (${h.status})`), validators: VALIDATORS, quorum: QUORUM } });
-  ctx.recordLedgerEvent({ ...c, kind: "TRANSACTION", action: "CONTRACT_DEPLOYED", result: "ACTIVE", explanation: `${CONTRACT_NAME} (${CONTRACT_ID}) v1.0.0 deployed with the three fixed rules.`, details: { contractId: CONTRACT_ID, version: "1.0.0" } });
-  for (const p of draft.patients.filter((p) => p.did)) {
-    const tx = `TX-${pad(++draft.counters.tx, 6)}`;
-    ctx.recordLedgerEvent({ txId: tx, action: "DID_REGISTERED", result: "REGISTERED", actor: { name: p.name, did: p.did!, role: "Patient", hospitalId: null }, explanation: `${p.name} (${p.id}) registered DID ${p.did}.`, details: { patientId: p.id, did: p.did } });
-  }
+  const deployed = ctx.recordLedgerEvent({ ...c, kind: "TRANSACTION", action: "CONTRACT_DEPLOYED", result: "ACTIVE", explanation: `${CONTRACT_NAME} (${CONTRACT_ID}) v1.0.0 deployed with the three fixed rules (simulated deployment).`, details: { contractId: CONTRACT_ID, version: "1.0.0" } });
   for (const consent of draft.consents) {
     const p = draft.patients.find((x) => x.id === consent.patientId)!;
     const tx = `TX-${pad(++draft.counters.tx, 6)}`;
     const ev = ctx.recordLedgerEvent({
       txId: tx, patientId: p.id, action: "SEED_CONSENT_LOADED", result: "ACTIVE", actor: CONSORTIUM_ACTOR,
-      explanation: `Initial demonstration data (loaded at genesis, not a user action): grant(${p.id}, ${consent.grantee.id}, [${consent.scope.join(", ")}], ${consent.purpose}, ${consent.expiry.slice(0, 10)}): ${p.name} allowed ${granteeLabel(consent.grantee, draft.users, draft.hospitals)} to access ${consent.scope.join(" and ")} for ${PURPOSE_LABEL[consent.purpose]}.`,
-      details: { consentId: consent.id, grantee: consent.grantee, scope: consent.scope, purpose: consent.purpose, expiry: consent.expiry, note: "Initial demonstration data" },
+      explanation: `Initial demonstration data (not a user action): ${p.name} (${p.id}) allows ${granteeLabel(consent.grantee, draft.users, draft.hospitals)} to access ${consent.scope.join(" and ")} for ${PURPOSE_LABEL[consent.purpose]} until ${consent.expiry.slice(0, 10)}.`,
+      details: { consentId: consent.id, grantee: consent.grantee, scope: consent.scope, purpose: consent.purpose, expiry: consent.expiry },
     });
     consent.eventId = ev.id;
     consent.txId = tx;
   }
   await ctx.seal();
   const block = await makeBlock(draft, { label: "Genesis block", txIds: [], requestId: null, eventHashes: draft.ledger.map((e) => e.currentHash), sequence: null, view: null, primary: null, commitVotes: [...VALIDATORS] });
-  const ev = ctx.recordLedgerEvent({ kind: "BLOCK", action: "BLOCK_COMMITTED", result: "COMMITTED", blockId: block.id, actor: NETWORK_ACTOR, explanation: "Genesis block committed, anchoring the initial events.", details: { label: block.label, hash: block.hash, merkleRoot: block.merkleRoot } });
-  draft.contracts[0].receipt = { txId: "TX-000000", blockId: block.id, deployedAt: draft.contracts[0].createdAt, deployer: "MedChain Consortium", address: `0x${(await sha256(`${CONTRACT_ID}:1.0.0`)).slice(0, 40)}`, eventId: ev.id };
+  draft.contracts[0].receipt = { txId: deployed.txId, blockId: block.id, deployedAt: draft.contracts[0].createdAt, deployer: "MedChain Consortium", address: `0x${(await sha256(`${CONTRACT_ID}:1.0.0`)).slice(0, 40)}`, eventId: deployed.id };
   // Nobody is signed in yet: authentication events come only from real sign-ins.
-  await ctx.seal();
   return draft;
 }
 
@@ -786,23 +762,15 @@ function useStoreValue() {
           setStatus(req, "HOSPITAL_APPROVED", ctx.session.name, ev.id);
         }),
 
-      // Release: the approval is committed by consensus first (each phase is recorded), then only permitted records are released.
-      releaseRecords: async (id: string) => {
-        const current = stateRef.current!.requests.find((r) => r.id === id);
-        if (!current) throw new Error(`Request ${id} not found`);
-        if (current.status === "HOSPITAL_APPROVED" || current.status === "CONSENSUS_FAILED") {
-          const run = await startPbft(id);
-          await runToEnd(run.id);
-        }
-        return commit((d, ctx) => {
+      // Release: only after the contract approved and the source hospital approved.
+      releaseRecords: (id: string) =>
+        commit((d, ctx) => {
           const req = findReq(d, id);
-          if (req.status === "CONSENSUS_FAILED") throw new Error("Consensus failed (fewer than 3 validators committed), so nothing was released. Bring validators online and try again.");
-          if (req.status !== "COMMITTED") throw new Error("Records are released only after the contract passes and the source hospital approves.");
+          if (req.status !== "HOSPITAL_APPROVED") throw new Error("Records are released only after all contract rules pass and the source hospital approves.");
           requireOfficerAt(ctx.session, req.sourceHospitalId, "record:release");
-          finalize(d, ctx, req, "RELEASED", "All three contract rules passed, the source hospital approved, and consensus committed the decision.", actorOf(ctx.session), req.blockId);
+          finalize(d, ctx, req, "RELEASED", "All three contract rules passed and the source hospital approved.", actorOf(ctx.session));
           return d.records.filter((r) => req.releasedRecordIds.includes(r.id));
-        });
-      },
+        }),
 
       // Patient notification: the patient opens their access history.
       viewAccessHistory: (patientId: string) =>

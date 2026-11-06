@@ -157,7 +157,6 @@ function LedgerInner() {
   const actionOptions = useMemo(() => [...new Set(state.ledger.map((e) => e.action))].sort(), [state.ledger]);
   const actorOptions = useMemo(() => [...new Set(state.ledger.map((e) => e.actor))].sort(), [state.ledger]);
 
-  const counts = state.ledger.reduce<Record<string, number>>((acc, e) => ((acc[e.kind] = (acc[e.kind] ?? 0) + 1), acc), {});
   const tamperCandidates = state.ledger.filter((e) => ["ACCESS_GRANTED", "ACCESS_DENIED", "CONTRACT_APPROVED", "CONTRACT_DENIED", "FINAL_DECISION", "CONSENT_GRANTED", "CONSENT_REVOKED", "HOSPITAL_APPROVED", "HOSPITAL_REJECTED", "MEDICAL_RECORD_RELEASED", "MEDICAL_RECORD_WITHHELD", "REQUEST_CREATED"].includes(e.action) || /^RULE_/.test(e.action));
 
   const exportCsv = () => {
@@ -213,17 +212,18 @@ function LedgerInner() {
         )
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {(["AUDIT", "PBFT", "TRANSACTION", "BLOCK"] as EventKind[]).map((k) => (
-          <button key={k} onClick={() => setKind(kind === k ? "ALL" : k)} className={cn("rounded-lg border bg-white p-3 text-left shadow-sm", kind === k ? "border-teal-400 ring-2 ring-teal-100" : "border-slate-200")}>
-            <div className="text-xs text-slate-500">{KIND_LABEL[k]}s</div>
-            <div className="text-xl font-semibold text-slate-900">{counts[k] ?? 0}</div>
-          </button>
-        ))}
+      <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="text-xs text-slate-500">Chain head</div>
-          <div className="truncate font-mono text-sm font-semibold text-slate-900">{state.blocks[state.blocks.length - 1]?.id}</div>
-          <div className="truncate font-mono text-[11px] text-slate-500">{state.ledger[state.ledger.length - 1]?.currentHash.slice(0, 16)}…</div>
+          <div className="text-xs text-slate-500">Ledger events</div>
+          <div className="text-xl font-semibold text-slate-900">{state.ledger.length}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="text-xs text-slate-500">Transactions</div>
+          <div className="text-xl font-semibold text-slate-900">{new Set(state.ledger.map((e) => e.txId)).size}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="text-xs text-slate-500">Latest hash</div>
+          <div className="truncate pt-1 font-mono text-sm font-semibold text-slate-900">{state.ledger[state.ledger.length - 1]?.currentHash.slice(0, 24)}…</div>
         </div>
       </div>
 
@@ -342,30 +342,6 @@ function LedgerInner() {
         </CardContent>
       </Card>
       )}
-
-      <Card>
-        <CardHeader><CardTitle>Committed blocks</CardTitle><CardDescription>Each block anchors a Merkle root of the events it covers and links to the previous block&apos;s hash.</CardDescription></CardHeader>
-        <CardContent className="overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-4 py-2">Height</th><th className="px-4 py-2">Block</th><th className="px-4 py-2">Label</th><th className="px-4 py-2">Tx</th><th className="px-4 py-2">Seq</th><th className="px-4 py-2">Votes</th><th className="px-4 py-2">Merkle root</th><th className="px-4 py-2">Prev</th><th className="px-4 py-2">Hash</th></tr></thead>
-            <tbody>
-              {[...state.blocks].reverse().map((b) => (
-                <tr key={b.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2">{b.height}</td>
-                  <td className="px-4 py-2 font-mono text-xs">{b.id}</td>
-                  <td className="px-4 py-2">{b.label}</td>
-                  <td className="px-4 py-2 font-mono text-xs">{b.txIds.join(", ") || "—"}</td>
-                  <td className="px-4 py-2">{b.sequence ?? "—"}</td>
-                  <td className="px-4 py-2 text-xs">{b.commitVotes.join(", ")}</td>
-                  <td className="px-4 py-2"><Hash value={b.merkleRoot} n={6} /></td>
-                  <td className="px-4 py-2"><Hash value={b.previousBlockHash} n={6} /></td>
-                  <td className="px-4 py-2"><Hash value={b.hash} n={6} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
 
       <Dialog open={!!receipt} onClose={() => setReceipt(null)} title="Transaction receipt">
         {receipt && <ReceiptView event={receipt} />}

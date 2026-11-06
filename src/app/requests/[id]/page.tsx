@@ -1,10 +1,9 @@
 "use client";
 
-import { ArrowLeft, Network, PackageOpen, ThumbsUp, Unlock } from "lucide-react";
+import { ArrowLeft, PackageOpen, ThumbsUp, Unlock } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { EmptyState, Explain, PageHeader, RoleGate, SimulationTag, useAction } from "@/components/common";
-import { NodeControls, PbftRunView } from "@/components/pbft-panel";
+import { EmptyState, Explain, PageHeader, RoleGate, useAction } from "@/components/common";
 import { FinalDecisionCard, RecordCard, RejectRequest, RequestSummary, RequestTimeline } from "@/components/request-parts";
 import { RulesPanel } from "@/components/rules-panel";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -12,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-const PHASES = ["Hospital verification", "Algorithm 08", "Hospital response", "Consensus and release"];
+const PHASES = ["Hospital verification", "Algorithm 08", "Hospital response", "Release"];
 
 function phaseIndex(status: string) {
   if (["SUBMITTED", "RECEIVED", "UNDER_REVIEW"].includes(status)) return 0;
@@ -31,7 +30,6 @@ export default function ExecutionPage() {
     return <EmptyState icon={PackageOpen} title={`Request ${id} not found`}><Link className="text-teal-700 underline" href="/requests">Back to requests</Link></EmptyState>;
   }
 
-  const latestRun = request.pbftRunIds.length ? state.pbftRuns.find((r) => r.id === request.pbftRunIds[0]) : undefined;
   const pIdx = phaseIndex(request.status);
   const released = state.records.filter((r) => request.releasedRecordIds.includes(r.id));
   const isOfficer = session.role === "RECORDS_OFFICER" && session.hospitalId === request.sourceHospitalId;
@@ -39,7 +37,7 @@ export default function ExecutionPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/requests?tab=inbox" className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"><ArrowLeft className="size-4" /> Hospital Requests</Link>
+      <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"><ArrowLeft className="size-4" /> Request Workflow</Link>
       <PageHeader
         title="Smart-contract execution"
         description={<>Algorithm 08 — <b>PatientConsentManagement</b> (SC-CONSENT-001) — evaluates the three fixed rules on live data. Records are released only if all rules pass <b>and</b> the source hospital approves.</>}
@@ -95,7 +93,7 @@ export default function ExecutionPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Unlock className="size-4 text-emerald-600" />Medical record release</CardTitle>
-            <CardDescription>Contract passed and hospital approved. Releasing first commits the decision through consensus (3 of 4 validators), then releases only the approved categories from {request.sourceHospitalId} to {request.requestingHospitalId}.</CardDescription>
+            <CardDescription>Contract passed and hospital approved. Only the approved categories are released from {request.sourceHospitalId} to {request.requestingHospitalId}.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {canRelease && (
@@ -114,22 +112,6 @@ export default function ExecutionPage() {
                 <div className="grid gap-3 md:grid-cols-2">{released.map((r) => <RecordCard key={r.id} record={r} released />)}</div>
               </>
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {(latestRun || canRelease) && (
-        <Card>
-          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="flex items-center gap-2"><Network className="size-4 text-blue-600" />Consensus for this request</CardTitle>
-              <CardDescription>Validator availability and the recorded PBFT phases for this transaction.</CardDescription>
-            </div>
-            <SimulationTag />
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <NodeControls disabled={request.status === "PBFT_IN_PROGRESS"} />
-            {latestRun && <PbftRunView run={latestRun} interactive={false} />}
           </CardContent>
         </Card>
       )}

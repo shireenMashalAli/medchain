@@ -1,6 +1,6 @@
-# MedChain — Blockchain Governance System for Healthcare
+# MedChain — Patient Consent Management on a Hash-Chained Ledger
 
-An interactive academic demonstration of consent-driven medical-record sharing between hospitals. It runs entirely in the browser: no backend, no paid service, no real blockchain node. Blockchain operations (PBFT consensus, contract deployment, blocks) are **simulated** and labelled as such. All patient data is synthetic.
+An academic demonstration of Algorithm 08, the Patient Consent Management Contract. A physician requests a patient's medical history, the hospital holding the records verifies the request, the smart contract applies three fixed rules, and every action is written to a SHA-256 hash-chained ledger shown live beside the page. Everything runs in the browser; the blockchain and contract deployment are simulated. All data is synthetic.
 
 ## Run it
 
@@ -9,64 +9,49 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 (Node.js 20.9+). The landing page, **Request Workflow**, walks one request through every step on a single page with the live ledger beside it. State is saved in `localStorage`; **Reset Demo Data** on the ledger page restores the initial data.
+Open http://localhost:3000 (Node.js 20.9+). Use a window at least 1200px wide so the live ledger stays on the right.
 
-## Layout
+## The four screens
 
-Left: navigation. Centre: the workspace. Right: the **live transaction ledger**, which shows every event the moment it has been hashed and saved: who acted, their role, the patient, the requesting and source hospitals, the record categories, the purpose, the transaction and request IDs, and the previous and current SHA-256 hashes. On screens narrower than 1280px it opens as a drawer from the "Live ledger" button. It reads the same event collection as the full ledger page.
+| Screen | What it is for |
+|---|---|
+| **Request Workflow** | The whole process on one page, in six steps: physician signs in and is authorized → requests the patient's history → source hospital receives and verifies → Algorithm 08 runs Rules 1–3 → hospital approves or rejects → records released (or access denied). |
+| **Patient Portal** | The patient grants consent (`grant`), revokes it (`revoke`), and sees who requested their records and what was decided. Includes a demo clock for the expired-consent test. |
+| **Smart Contract Studio** | The contract (ID, version, SHA-256 hash), the three fixed rules, the actual executed TypeScript of `grant`/`check`/`revoke`, execution history and the simulated deployment receipt. |
+| **Transaction Ledger** | Every event with transaction ID, request ID, actor and role, explanation, previous and current hash. Search, filters, hash inspection, Verify Ledger, tampering demonstration, CSV export, Reset Demo Data. |
 
-## The workflow (as performed in the GUI)
+## Algorithm 08
 
-1. **Sign in** (session menu, top right) → `AUTHENTICATION_VERIFIED`, `CREDENTIAL_VERIFIED`, `HOSPITAL_VERIFIED`.
-2. **Physician requests a patient's history** (Hospital Requests → New request) → `REQUEST_CREATED`, with a request ID and a transaction ID that every later event of the request reuses.
-3. **Source hospital records officer**: Receive → `REQUEST_RECEIVED`; Start review → `REQUEST_REVIEW_STARTED`; Complete verification (professional, patient reference, requested data, consent on file) → `HOSPITAL_VERIFICATION_COMPLETED`.
-4. **Algorithm 08** (execution screen): `CONTRACT_EXECUTION_STARTED`, `RULE_1_EVALUATED`, `RULE_2_EVALUATED`, `RULE_3_EVALUATED`, then `CONTRACT_APPROVED` or `CONTRACT_DENIED`. A failed rule ends the request (`ACCESS_DENIED`, `MEDICAL_RECORD_WITHHELD`) and cannot be overridden.
-5. **Hospital response**: Approve → `HOSPITAL_APPROVED`, or Reject with reason → `HOSPITAL_REJECTED` and `ACCESS_DENIED`.
-6. **Release**: consensus commits the approval (PBFT phases recorded), then `ACCESS_GRANTED` and `MEDICAL_RECORD_RELEASED` for the permitted categories only, followed by `FINAL_DECISION` and `PATIENT_NOTIFIED`.
-7. **Patient Portal**: grant (`CONSENT_GRANTED`) or revoke (`CONSENT_REVOKED`) consent, and see every request for their records with its decision and reason.
+`src/lib/contract.ts`: `grant()`, `check()` (Rules 1→2→3, stopping at the first failure) and `revoke()`.
+
+- **R1 — Identity and hospital:** signed in, credential verified, hospital registered and active, role permits the action.
+- **R2 — Consent and scope:** a consent exists for the requesting hospital or professional, and every requested category is in scope.
+- **R3 — Purpose, expiry, revocation:** purpose matches; consent active, not revoked, not expired.
+
+A failed rule denies access. There is no override.
+
+## Sample data
+
+- Patient: Ayesha Khan (PAT-001), with LAB, ECG and MRI records at H2 General Hospital.
+- Initial consent: H1 City Hospital may access LAB and ECG for Treatment until 31 December 2026.
+- Hospitals: H1 City, H2 General, H3 Medical Centre, H4 Central (registered); H5 External (not registered).
+- Users: Ayesha Khan (Patient), Dr. Ahmed Raza (Physician, H1), Dr. Victor Hale (Physician, H5 — unauthorized), Sara Malik (Records Officer, H2), Imran Qureshi (Hospital Administrator), Grace Mensah (Auditor).
+
+## Demonstration scenarios
+
+| Scenario | How | Result |
+|---|---|---|
+| Successful ECG request | Request Workflow with Dr. Ahmed Raza, ECG | R1–R3 pass, hospital approves, ECG released |
+| MRI request | Same, tick MRI | Denied by Rule 2 |
+| Unauthorized hospital | Choose Dr. Victor Hale (H5) | Denied by Rule 1 |
+| Revoked consent | Patient Portal → Revoke, then request ECG | Denied by Rule 3 |
+| Expired consent | Patient Portal → grant with +7 days, demo clock +7 twice, then request ECG | Denied by Rule 3 |
+| Ledger tampering | Transaction Ledger → alter an event → Verify Ledger | Verification fails at that event |
+
+Ledger events for one approved request: `REQUEST_CREATED`, `REQUEST_RECEIVED`, `REQUEST_REVIEW_STARTED`, `HOSPITAL_VERIFICATION_COMPLETED`, `CONTRACT_EXECUTION_STARTED`, `RULE_1/2/3_EVALUATED`, `CONTRACT_APPROVED`, `HOSPITAL_APPROVED`, `ACCESS_GRANTED`, `MEDICAL_RECORD_RELEASED`. Signing in adds `AUTHENTICATION_VERIFIED`, `CREDENTIAL_VERIFIED`, `HOSPITAL_VERIFIED`.
 
 ## How events are recorded
 
-All changes go through one queue in `src/lib/store.tsx`:
+All changes go through one queue in `src/lib/store.tsx`. `recordLedgerEvent()` assigns the event ID, reuses the request's transaction ID and captures the actor, patient and request. Each event is chained with `currentHash = SHA256(previousHash + canonicalEventPayload)` (Web Crypto API, `src/lib/ledger.ts`) and saved to `localStorage` before the screen updates. Open tabs stay in sync.
 
-- `commit()` rebases on the newest saved state (so another tab's events are never overwritten), applies the change, and records events with `recordLedgerEvent()`.
-- `recordLedgerEvent()` assigns the event ID, reuses the transaction ID, captures the signed-in actor, role and hospital, and attaches the patient and request context.
-- Every new event is hashed in order: `currentHash = SHA256(previousHash + canonicalEventPayload)` using the Web Crypto API (`src/lib/ledger.ts`).
-- The state is saved to `localStorage` **before** any screen updates. If saving fails, the action is rejected and shown as an error.
-- Other open tabs pick up the change through the `storage` event.
-
-The initial demonstration data (two consents, two patient DIDs, the contract) is labelled as genesis/seed data on the ledger, not as user actions.
-
-## Algorithm 08 — Patient Consent Management Contract
-
-`src/lib/contract.ts` holds the code every page runs: `grant()`, `check()` (which calls `evaluateRule(1..3)`), and `revoke()`. Contract Studio shows this file as-is ("Executed TypeScript") with its SHA-256 hash, alongside the contract pseudocode.
-
-- **R1 — Identity and hospital:** requester and processor authenticated, credentials verified, hospitals registered and active, roles permit the action.
-- **R2 — Consent and scope:** a consent exists for the requesting hospital or designated professional, and every requested category is in scope.
-- **R3 — Purpose, expiry, revocation:** purpose matches; consent is active, not revoked, not expired.
-
-## Test scenarios
-
-On the Guided Demonstration, pick a card and press **Run All**, or do the same steps by hand.
-
-| | Scenario | Result |
-|---|---|---|
-| 1 | Successful ECG request | All rules pass, hospital approves, ECG released |
-| 2 | MRI request | Denied by Rule 2 |
-| 3 | Unauthorized hospital (H5) | Denied by Rule 1 |
-| 4 | Revoked consent | Denied by Rule 3 |
-| 5 | Expired consent (demo clock moves past expiry) | Denied by Rule 3 |
-| 6 | Ledger tampering | Verification fails at the altered event |
-| 7 | One PBFT node offline | 3 of 4 validators commit; ECG released |
-
-Sample data: patient Ayesha Khan (PAT-001); initial consent to H1 City Hospital for LAB and ECG, purpose Treatment, expiring 31 December 2026. Hospitals H1–H4 are active validators; H5 External Hospital is unregistered. Demo users include Dr. Ahmed Raza (physician, H1), Sara Malik (records officer, H2), an administrator, a validator and an auditor.
-
-## Project layout
-
-```
-src/
-  app/                 pages (App Router), one folder per sidebar entry; api/contract-source serves contract.ts
-  components/          app shell, live ledger, session selector, rules panel, PBFT panel, code viewer
-  components/ui/       shadcn-style primitives
-  lib/                 types, seed data, Algorithm 08, PBFT, ledger, Merkle, identity, store
-```
+The repository also contains extra demo pages from an earlier, broader brief (`/guided`, `/dashboard`, `/requests`, `/pbft`, `/governance`, `/network`, `/merkle`). They are not in the menu and are not needed for this assignment.

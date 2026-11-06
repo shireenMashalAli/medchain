@@ -263,7 +263,7 @@ export default function RequestWorkflowPage() {
             {request.status !== "RELEASED" && (
               <>
                 <ActAs user={officer} why="The source hospital releases the records." />
-                <p className="text-sm text-slate-600">The decision is committed by the hospital validators (3 of 4 must agree, simulated), then only the approved categories are released.</p>
+                <p className="text-sm text-slate-600">Contract passed and hospital approved, so only the approved categories are released.</p>
                 <Button disabled={busy || !officerSignedIn} onClick={() => run(() => actions.releaseRecords(request.id), (r) => `${r.length} record(s) released`)}>Release permitted records</Button>
               </>
             )}

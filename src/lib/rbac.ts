@@ -3,7 +3,7 @@ import type { Permission, Purpose, RecordCategory, Role } from "./types";
 export const ROLE_LABEL: Record<Role, string> = {
   PATIENT: "Patient",
   PHYSICIAN: "Physician",
-  GOVERNANCE_ADMIN: "Hospital Administrator (Governance)",
+  GOVERNANCE_ADMIN: "Hospital Administrator",
   RECORDS_OFFICER: "Hospital Records Officer",
   VALIDATOR: "Validator",
   AUDITOR: "Auditor",
@@ -40,7 +40,8 @@ export function hasPermission(role: Role, permission: Permission) {
   return RBAC[role].includes(permission);
 }
 
-export const CATEGORIES: RecordCategory[] = ["LAB", "ECG", "MRI", "XRAY", "PRESCRIPTION", "DISCHARGE"];
+// The record categories used in the assignment.
+export const CATEGORIES: RecordCategory[] = ["LAB", "ECG", "MRI"];
 
 export const CATEGORY_LABEL: Record<RecordCategory, string> = {
   LAB: "Laboratory results",
