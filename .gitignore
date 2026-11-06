@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+docs/report-tools/node_modules/
+docs/report-tools/out/
+docs/report-tools/package*.json

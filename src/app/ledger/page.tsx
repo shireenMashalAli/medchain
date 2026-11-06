@@ -127,7 +127,6 @@ function LedgerInner() {
   const params = useSearchParams();
   const { busy, run } = useAction();
   const [q, setQ] = useState(params.get("q") ?? "");
-  const [kind, setKind] = useState<EventKind | "ALL">("ALL");
   const [outcome, setOutcome] = useState<"ALL" | "success" | "danger" | "pending">("ALL");
   const [hospitalId, setHospitalId] = useState("ALL");
   const [action, setAction] = useState("ALL");
@@ -144,7 +143,6 @@ function LedgerInner() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return [...state.ledger].reverse().filter((e) => {
-      if (kind !== "ALL" && e.kind !== kind) return false;
       if (outcome !== "ALL" && resultTone(e.result) !== outcome) return false;
       if (hospitalId !== "ALL" && e.hospitalId !== hospitalId && e.subject?.requestingHospitalId !== hospitalId && e.subject?.sourceHospitalId !== hospitalId) return false;
       if (action !== "ALL" && e.action !== action) return false;
@@ -153,7 +151,7 @@ function LedgerInner() {
       if (!needle) return true;
       return [e.id, e.txId, e.action, e.actor, e.actorRole, e.result, e.requestId, e.blockId, e.currentHash, e.explanation, e.subject?.patientId, e.subject?.patientName, JSON.stringify(e.details)].some((f) => f && String(f).toLowerCase().includes(needle));
     });
-  }, [state.ledger, q, kind, outcome, hospitalId, action, actor, day]);
+  }, [state.ledger, q, outcome, hospitalId, action, actor, day]);
   const actionOptions = useMemo(() => [...new Set(state.ledger.map((e) => e.action))].sort(), [state.ledger]);
   const actorOptions = useMemo(() => [...new Set(state.ledger.map((e) => e.actor))].sort(), [state.ledger]);
 
@@ -259,10 +257,6 @@ function LedgerInner() {
               <Search className="absolute top-2.5 left-2.5 size-4 text-slate-400" />
               <Input className="pl-8" placeholder="Search transaction ID, request ID, patient (PAT-001 / name), actor, hash…" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
-            <Select aria-label="Event type" className="w-auto" value={kind} onChange={(e) => setKind(e.target.value as EventKind | "ALL")}>
-              <option value="ALL">All types</option>
-              {(["AUDIT", "PBFT", "TRANSACTION", "BLOCK"] as EventKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-            </Select>
             <Select aria-label="Result" className="w-auto" value={outcome} onChange={(e) => setOutcome(e.target.value as typeof outcome)}>
               <option value="ALL">All results</option><option value="success">Success</option><option value="danger">Denied / failed</option><option value="pending">Pending</option>
             </Select>
@@ -348,7 +342,7 @@ function LedgerInner() {
       </Dialog>
 
       <Dialog open={confirmReset} onClose={() => setConfirmReset(false)} title="Reset demo data?">
-        <p className="text-sm text-slate-700">This clears consents, requests, PBFT rounds, contract versions, proposals and the whole ledger, then rebuilds the genesis state. It cannot be undone.</p>
+        <p className="text-sm text-slate-700">This clears consents, requests, contract versions and the whole ledger, then restores the initial demonstration data. It cannot be undone.</p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="outline" onClick={() => setConfirmReset(false)}>Cancel</Button>
           <Button variant="destructive" onClick={async () => { await actions.resetDemo(); setVerification(null); setConfirmReset(false); notify("Demo data reset"); }}>Reset everything</Button>

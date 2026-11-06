@@ -54,4 +54,6 @@ Ledger events for one approved request: `REQUEST_CREATED`, `REQUEST_RECEIVED`, `
 
 All changes go through one queue in `src/lib/store.tsx`. `recordLedgerEvent()` assigns the event ID, reuses the request's transaction ID and captures the actor, patient and request. Each event is chained with `currentHash = SHA256(previousHash + canonicalEventPayload)` (Web Crypto API, `src/lib/ledger.ts`) and saved to `localStorage` before the screen updates. Open tabs stay in sync.
 
+A submission document with screenshots of every step and the live ledger is in `docs/MedChain_Submission.pdf` (regenerate with `docs/report-tools`).
+
 The repository also contains extra demo pages from an earlier, broader brief (`/guided`, `/dashboard`, `/requests`, `/pbft`, `/governance`, `/network`, `/merkle`). They are not in the menu and are not needed for this assignment.

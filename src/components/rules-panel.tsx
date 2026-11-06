@@ -96,12 +96,12 @@ export function RulesPanel({ request, interactive = true }: { request: DataReque
 
       {request.decision === "DENY" && (
         <Explain tone="warn" title={`Request denied${request.deniedByRule ? ` by Rule ${request.deniedByRule}` : " by emergency extension E1"}`}>
-          The denial has been written to the ledger. PBFT consensus is not started and no record is released.
+          The denial has been written to the ledger. The hospital cannot override it, and no record is released.
         </Explain>
       )}
       {request.decision === "APPROVE" && (
         <Explain tone="tip" title="All three rules passed">
-          The contract approved the request, but approval alone does not release data. The transaction must now be committed by PBFT consensus across the hospital validators.
+          The contract approved the request, but approval alone does not release data. The source hospital must now approve it before the permitted records are released.
         </Explain>
       )}
     </div>
