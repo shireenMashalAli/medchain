@@ -30,7 +30,7 @@ export function Toaster() {
     return () => window.removeEventListener(TOAST_EVENT, onToast);
   }, []);
   return (
-    <div className="fixed bottom-16 left-4 z-[60] flex w-80 flex-col gap-2 lg:left-[272px] xl:bottom-4" aria-live="polite">
+    <div className="fixed bottom-16 left-4 z-[60] flex w-80 flex-col gap-2 lg:left-[272px] min-[1200px]:bottom-4" aria-live="polite">
       {items.map((t) => (
         <div
           key={t.id}

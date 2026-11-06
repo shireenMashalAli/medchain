@@ -110,7 +110,7 @@ function LedgerToggle({ onOpen }: { onOpen: () => void }) {
   const { state } = useStore();
   if (!state) return null;
   return (
-    <button onClick={onOpen} className="fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-full bg-[#0b1d36] px-4 py-2.5 text-sm font-medium text-white shadow-lg xl:hidden">
+    <button onClick={onOpen} className="fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-full bg-[#0b1d36] px-4 py-2.5 text-sm font-medium text-white shadow-lg min-[1200px]:hidden">
       <Radio className="size-4 text-teal-300" /> Live ledger ({state.ledger.length})
     </button>
   );
@@ -136,18 +136,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         )}
-        <div className="flex min-w-0 flex-1 flex-col lg:pl-64 xl:pr-[360px]">
+        <div className="flex min-w-0 flex-1 flex-col lg:pl-64 min-[1200px]:pr-[320px] 2xl:pr-[360px]">
           <TopBar onMenu={() => setMobileOpen(true)} />
           <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 lg:px-8">
             <Gate>{children}</Gate>
           </main>
         </div>
         {/* Right: permanent live ledger on wide screens, a drawer on smaller ones */}
-        <aside className="fixed inset-y-0 right-0 hidden w-[360px] border-l border-slate-200 xl:block">
+        <aside className="fixed inset-y-0 right-0 hidden w-[320px] border-l border-slate-200 min-[1200px]:block 2xl:w-[360px]">
           <LiveLedger />
         </aside>
         {ledgerOpen && (
-          <div className="fixed inset-0 z-50 xl:hidden">
+          <div className="fixed inset-0 z-50 min-[1200px]:hidden">
             <div className="absolute inset-0 bg-slate-900/40" onClick={() => setLedgerOpen(false)} />
             <div className="absolute inset-y-0 right-0 w-[min(92vw,380px)] shadow-xl">
               <LiveLedger onClose={() => setLedgerOpen(false)} />
