@@ -23,11 +23,13 @@ export function trustedIssuers(hospitals: Hospital[]) {
 export async function verifyCredential(vc: VerifiableCredential, hospitals: Hospital[], now = new Date()) {
   const recomputed = await sha256(credentialBody(vc));
   const issuers = trustedIssuers(hospitals);
+  // Each label states the actual outcome, so a failed check never reads like a passed one.
+  const check = (passed: boolean, ok: string, fail: string) => ({ label: passed ? ok : fail, passed });
   const checks = [
-    { label: `Issuer ${vc.issuer} is a trusted consortium issuer`, passed: issuers.includes(vc.issuer) },
-    { label: "Proof hash matches credential contents (not altered)", passed: recomputed === vc.proof },
-    { label: `Credential not expired (expires ${vc.expiresAt.slice(0, 10)})`, passed: new Date(vc.expiresAt) > now },
-    { label: "Credential not revoked", passed: vc.status === "VALID" },
+    check(issuers.includes(vc.issuer), `Issuer ${vc.issuer} is a trusted consortium issuer`, `Issuer ${vc.issuer} is NOT a trusted consortium issuer`),
+    check(recomputed === vc.proof, "Proof hash matches the credential contents (not altered)", "Proof hash does NOT match the credential contents (altered)"),
+    check(new Date(vc.expiresAt) > now, `Credential in date (expires ${vc.expiresAt.slice(0, 10)})`, `Credential EXPIRED on ${vc.expiresAt.slice(0, 10)}`),
+    check(vc.status === "VALID", "Credential not revoked", "Credential has been REVOKED"),
   ];
   return { verified: checks.every((c) => c.passed), checks };
 }

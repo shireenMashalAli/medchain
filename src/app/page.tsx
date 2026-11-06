@@ -138,7 +138,7 @@ export default function RequestWorkflowPage() {
         ) : (
           <ul className="space-y-1">
             <Check ok={!!state.authentications[physician.id]}>Authenticated with DID <span className="font-mono text-xs">{physician.did}</span></Check>
-            <Check ok={v?.verified === true}>Professional credential verified {v && !v.verified && <span className="text-red-700">— {v.checks.filter((c) => !c.passed).map((c) => c.label).join("; ")}</span>}</Check>
+            <Check ok={v?.verified === true}>{v?.verified ? "Professional credential verified" : <>Professional credential <b>NOT</b> verified {v && <span className="text-red-700">— {v.checks.filter((c) => !c.passed).map((c) => c.label).join("; ")}</span>}</>}</Check>
             <Check ok={ph?.status === "ACTIVE"}>Hospital {ph?.id} {ph?.name} is {ph?.status === "ACTIVE" ? "registered and active" : "NOT registered"}</Check>
             <Check ok={canRequest}>Role {ROLE_LABEL[physician.role]} may request patient history</Check>
           </ul>
