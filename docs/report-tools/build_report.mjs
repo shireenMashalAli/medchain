@@ -13,7 +13,8 @@ const reqs = data.requests;
 const reqA = reqs.find((r) => r.status === "RELEASED");
 const reqB = reqs.find((r) => r.deniedByRule === 2);
 const reqC = reqs.find((r) => r.deniedByRule === 1);
-const r3 = reqs.filter((r) => r.deniedByRule === 3).sort((a, b) => a.id.localeCompare(b.id));
+const r3 = reqs.filter((r) => r.deniedByRule === 3 && r.decision === "DENY").sort((a, b) => a.id.localeCompare(b.id));
+const reqF = reqs.find((r) => r.status === "DENIED" && r.decision === "APPROVE");
 const reqD = r3[0];
 const reqE = r3[1];
 const contract = data.contract;
@@ -94,6 +95,9 @@ const compliance = [
   ["Step 7 — patient notification and access history", "Patient Portal lists every request, hospital, decision and reason", "§9"],
   ["Patient Portal: profile, categories, grant, purpose (Treatment/Research), expiry, active permissions, revoke, history", "Patient Portal screen", "§8, §9"],
   ["Revocation immediately affects later checks", `Revoked consent → ${reqD.id} denied by Rule 3`, "§8.2"],
+  ["Lecture line 2: require caller ∈ {p, guardian(p)}", "requirePatientOrGuardian() in grant() and revoke(); caller DID compared with the patient and guardian DIDs", "§4.1"],
+  ["Lecture line 3: consents[p][g] keyed by DIDs", "Consent stores patientDid and grantee DID; key shown on screen and in ledger events", "§4.1"],
+  ["Lecture line 6: every access path calls check() first", `check() re-run at release; ${reqF.id} blocked after a late revocation`, "§4.4, §8.4"],
   ["Every meaningful activity recorded; Event ID, Transaction ID, Request ID, timestamp, actor and role, hospital, event type, result, explanation, previous and current hash", "recordLedgerEvent() in src/lib/store.tsx", "§5, all event tables"],
   ["currentHash = SHA256(previousHash + payload), chained to the previous event", "Web Crypto API; canonical JSON payload; genesis previousHash = 64 zeros", "§5, Appendix A"],
   ["Live ledger updates, transaction history, event details, hash inspection, verification, tampering demo, CSV export", "Right-side live ledger; Transaction Ledger screen", "§10"],
@@ -163,9 +167,9 @@ ul { margin: 4px 0 6px 18px; padding: 0; } li { margin: 2px 0; }
 <section class="chapter">
 <h2>Contents</h2>
 <ol>
-<li>Objective</li><li>Running the application</li><li>Users, roles and sample data</li><li>Algorithm 08 — logic and reasoning</li><li>Hash-chained ledger — design and reasoning</li>
+<li>Objective</li><li>Running the application</li><li>Users, roles and sample data</li><li>Algorithm 08 — mapping to the lecture definition, logic and reasoning</li><li>Hash-chained ledger — design and reasoning</li>
 <li>Case 1 — successful ECG request (approved), step by step with the live ledger</li><li>Case 2 — MRI request outside consent (denied by Rule 2)</li>
-<li>Further denial cases — unauthorized hospital (Rule 1), revoked consent and expired consent (Rule 3)</li><li>Patient Portal — consent and access history</li><li>Ledger integrity — verification, tampering and hash inspection</li>
+<li>Further denial cases — unauthorized hospital (Rule 1), revoked consent, expired consent (Rule 3), and consent revoked after approval (check() at release)</li><li>Patient Portal — consent and access history</li><li>Ledger integrity — verification, tampering and hash inspection</li>
 <li>Smart Contract Studio</li><li>Requirement compliance matrix</li><li>Test results summary</li><li>Appendix A — full hash chain of the approved transaction</li><li>Appendix B — contract code as deployed</li>
 </ol>
 
@@ -207,42 +211,58 @@ ${users.map((u) => `<tr>${u.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).jo
 
 <section class="chapter">
 <h2>4. Algorithm 08 — Patient Consent Management Contract</h2>
-<p>The algorithm is one TypeScript module, <span class="mono">src/lib/contract.ts</span>, with three public functions. Every screen calls these functions through the central store; there is no second copy of the decision logic. The pure functions take their inputs as arguments, so the same inputs always give the same decision.</p>
+<p>The algorithm is one TypeScript module, <span class="mono">src/lib/contract.ts</span>, with the three functions of the lecture definition. Every screen calls these functions through the central store; there is no second copy of the decision logic. The functions are pure: the same inputs always give the same decision.</p>
+<p><b>Variables (as in the lecture):</b> <span class="mono">p</span> = patient DID; <span class="mono">g</span> = grantee DID (a hospital or a designated professional); <span class="mono">scope</span> = record types allowed; <span class="mono">type</span> = record type requested; <span class="mono">purpose</span> = TREATMENT | RESEARCH; <span class="mono">exp</span> = expiry; <span class="mono">now</span> = block time; <span class="mono">guardian(p)</span> = the patient's legal guardian.</p>
 
-<h3>4.1 grant(patient, grantee, scope, purpose, expiry)</h3>
-<pre>require patient has a registered DID
-require scope is not empty
-require now &lt; expiry &lt;= now + maxConsentDays          (policy: 365 days)
-mark any ACTIVE consent of this patient for this grantee as SUPERSEDED
-add Consent(patient, grantee, scope, purpose, expiry, ACTIVE)
-record CONSENT_GRANTED on the ledger</pre>
-<p><b>Reasoning.</b> The grantee is either a hospital or one designated professional. Superseding the old consent keeps exactly one active consent per grantee, so check() never has to choose between conflicting consents. The expiry limit stops open-ended sharing.</p>
+<h3>4.1 Mapping to the lecture's Algorithm 08</h3>
+<table><thead><tr><th style="width:4%">#</th><th style="width:27%">Lecture line</th><th style="width:33%">Implementation</th><th>Notes</th></tr></thead><tbody>
+<tr><td>1</td><td class="mono">grant(p, g, scope, purpose, exp)</td><td><span class="mono">grant()</span> in contract.ts, called by the Patient Portal</td><td>Same five inputs. Also requires a registered patient DID, a non-empty scope and an expiry in the future within the policy limit (365 days).</td></tr>
+<tr><td>2</td><td class="mono">require caller ∈ {p, guardian(p)}</td><td><span class="mono">requirePatientOrGuardian()</span> inside <span class="mono">grant()</span> and <span class="mono">revoke()</span></td><td>The signed-in caller's DID must equal the patient's DID or the patient's guardian DID. Ayesha is an adult, so she has no guardian in the demo data.</td></tr>
+<tr><td>3</td><td class="mono">consents[p][g] ← {scope, purpose, exp}</td><td>Consent stored with <span class="mono">patientDid</span> and <span class="mono">grantee.did</span>; the key <span class="mono">consents[p][g]</span> is shown on screen and in the ledger</td><td>A new grant for the same (p, g) replaces the previous entry, so there is one active entry per pair.</td></tr>
+<tr><td>4</td><td class="mono">check(p, g, type): type ∈ scope ∧ now &lt; exp</td><td><span class="mono">check()</span> → <span class="mono">evaluateRule(1..3)</span></td><td><span class="mono">type ∈ scope</span> is Rule 2; <span class="mono">now &lt; exp</span> is Rule 3. The assignment's fixed rules add identity checks (Rule 1), and the purpose match and revocation status (Rule 3).</td></tr>
+<tr><td>5</td><td class="mono">revoke(p, g): delete consents[p][g]; emit</td><td><span class="mono">revoke()</span>; CONSENT_REVOKED is recorded</td><td>The entry is marked REVOKED instead of being physically deleted. For access the effect is identical (check() can never pass again), but the assignment's Rule 3 must report "revoked", and the audit trail must keep the record.</td></tr>
+<tr><td>6</td><td>every access path calls check() first</td><td><span class="mono">check()</span> runs at the contract step, <b>and again at the moment of release</b> (ACCESS_CHECK_AT_RELEASE)</td><td>A consent revoked or expired after approval still blocks the release (demonstrated in §8.4).</td></tr>
+<tr><td>—</td><td>now = block time</td><td>Browser clock (plus the demo clock for the expiry test)</td><td>Simulated: there are no real blocks.</td></tr>
+<tr><td>—</td><td>Sample input: scope {LAB, ECG}, TREATMENT, exp 2026-12-31; check(…, MRI) → false</td><td>Seed consent CON-0001 has exactly these values</td><td>The MRI request is denied by Rule 2 (§7).</td></tr>
+</tbody></table>
 
-<h3>4.2 revoke(patient, grantee)</h3>
-<pre>require the caller is the patient
-require at least one ACTIVE consent exists for (patient, grantee)
-set those consents to REVOKED, store revokedAt = now
-record CONSENT_REVOKED on the ledger</pre>
-<p><b>Reasoning.</b> The consent is kept (with status REVOKED) instead of being deleted, so the audit trail stays complete and Rule 3 can explain <i>why</i> a later request fails.</p>
+<h3>4.2 grant(p, g, scope, purpose, exp)</h3>
+<pre>require caller == p  or  caller == guardian(p)           (line 2)
+require p has a registered DID, scope is not empty
+require now &lt; exp &lt;= now + maxConsentDays
+consents[p][g] = {scope, purpose, exp, ACTIVE}            (line 3; previous entry for (p, g) superseded)
+emit CONSENT_GRANTED</pre>
+<p><b>Reasoning.</b> Only the patient, or someone legally acting for them, can share their data. Keeping one entry per (p, g) means check() never has to choose between conflicting consents, and the expiry limit stops open-ended sharing.</p>
 
-<h3>4.3 check(patient, grantee, record_type)</h3>
-<pre>consent = newest ACTIVE consent for (patient, grantee.hospital or grantee.professional),
-          otherwise the newest consent of any status
-if not R1(grantee, processor)                    → DENY (Rule 1)
-if not R2(consent, grantee, record_type)         → DENY (Rule 2)
-if not R3(consent, request.purpose, now)         → DENY (Rule 3)
-→ APPROVE   (records are still only released after the source hospital approves)</pre>
-<p><b>Why this order.</b> Identity is checked first so that an unauthorized party is stopped before the contract looks at the patient's consent at all. Scope (R2) is checked before validity (R3) because a request for records the patient never consented to should be reported as out of scope, which is the more useful explanation. Evaluation stops at the first failure, like <span class="mono">require()</span> in a smart contract.</p>
-<p><b>Why the newest consent of any status is used when none is active.</b> If a consent was revoked or expired, Rule 3 can then say exactly that ("consent CON-0001 is REVOKED") instead of the less precise "no consent found".</p>
+<h3>4.3 check(p, g, type)</h3>
+<pre>consent = consents[p][g]      (newest ACTIVE entry for the professional's DID or their hospital's DID; else the latest one)
+if not R1(g, processor)                       → DENY (Rule 1)
+if not R2(consent, g, type)                   → DENY (Rule 2)   type ∈ scope
+if not R3(consent, request.purpose, now)      → DENY (Rule 3)   now &lt; exp, purpose matches, not revoked
+→ APPROVE</pre>
+<p><b>Why this order.</b> Identity is checked first so that an unauthorized party is stopped before the contract reads the patient's consent at all. Scope (R2) is checked before validity (R3) because a request for records the patient never consented to is best explained as out of scope. Evaluation stops at the first failure, like <span class="mono">require()</span> in a smart contract.</p>
+<p><b>Why the latest entry is used when none is active.</b> If a consent was revoked or has expired, Rule 3 can then say exactly that ("consent CON-0001 is REVOKED") instead of "no consent found".</p>
 
-<h3>4.4 The three fixed rules</h3>
+<h3>4.4 revoke(p, g) and line 6 (every access path calls check() first)</h3>
+<pre>revoke(p, g):
+  require caller == p  or  caller == guardian(p)
+  consents[p][g].status = REVOKED                        (line 5; equivalent to delete for access)
+  emit CONSENT_REVOKED
+
+releaseRecords(request):                                 (line 6)
+  require contract decision == APPROVE and hospital approved
+  require check(p, g, type) == APPROVE                   (re-run at the moment of access)
+  release only records whose type was requested and is in scope</pre>
+<p><b>Reasoning.</b> Consent can change between the contract decision and the moment the records leave the hospital. Re-running check() at release means the patient's latest decision always wins.</p>
+
+<h3>4.5 The three fixed rules</h3>
 <table><thead><tr><th style="width:15%">Rule</th><th style="width:30%">Condition</th><th>Checks (actual inputs shown on screen)</th><th style="width:22%">Why it exists</th></tr></thead><tbody>
 <tr><td><b>R1</b> Identity and hospital authorization</td><td class="mono">user.authenticated && user.credentialVerified && hospital.status == ACTIVE && role.hasPermission</td><td>Requester signed in; requester credential verified (trusted issuer, unaltered, in date, not revoked); requesting hospital ACTIVE; role Physician has request:create; the processing records officer is signed in, verified, has request:process and works at the source hospital; source hospital ACTIVE.</td><td>Only known, verified professionals at registered hospitals may request or process patient data.</td></tr>
 <tr><td><b>R2</b> Patient consent and record scope</td><td class="mono">consent != null && grantee IN consent.grantees && requestedRecordType IN consent.allowedScope</td><td>A consent exists for the requesting hospital or the designated professional; every requested category is in the consented scope.</td><td>The patient decides who sees which records (data minimisation).</td></tr>
 <tr><td><b>R3</b> Purpose, expiry and revocation</td><td class="mono">request.purpose == consent.purpose && consent.status == ACTIVE && currentTime &lt; consent.expiry</td><td>Purpose matches; consent ACTIVE (not revoked or superseded); current time before expiry.</td><td>Consent is purpose-bound and time-limited, and the patient can withdraw it at any time.</td></tr>
 </tbody></table>
 
-<h3>4.5 No override, and release only after hospital approval</h3>
+<h3>4.6 No override, and release only after hospital approval</h3>
 <ul>
 <li>A failed rule records CONTRACT_DENIED and ACCESS_DENIED and ends the request. The screens then show no Approve or Release action, and the store itself refuses approval unless the request's status is CONTRACT_APPROVED. No role, including the Hospital Administrator, has an override function.</li>
 <li>The baseline rules are fixed. Contract Studio validation rejects any new version whose rule text differs from the fixed rules.</li>
@@ -350,6 +370,15 @@ ${eventsTable(step("e4_denied").events.filter((e) => e.requestId && /RULE|CONTRA
 </section>
 
 <section class="chapter">
+<h3>8.4 Consent revoked after approval — blocked at release (${esc(reqF.id)})</h3>
+<p>This demonstrates line 6 of Algorithm 08 (every access path calls check() first). The contract approves the request and the hospital approves it. Before the records are released, Ayesha revokes City Hospital's permission. When the officer clicks Release, check() is run again.</p>
+${figure("r1_approved", "Contract approved and hospital approved. No record has been released yet.")}
+${figure("r2_revoked", "Ayesha revokes City Hospital: revoke(p, g). CONSENT_REVOKED appears in the live ledger.")}
+${figure("r3_blocked", "Release re-runs check(): Rule 3 fails (consent REVOKED). ACCESS_CHECK_AT_RELEASE FAIL and ACCESS_DENIED are recorded, and nothing is released.")}
+${eventsTable(step("r3_blocked").events.filter((e) => e.requestId), { caption: "Events written by the release attempt" })}
+</section>
+
+<section class="chapter">
 <h2>9. Patient Portal — consent and access history</h2>
 <p>The patient can see their profile, record categories and who may currently see each one; grant consent (to hospitals or designated professionals; purpose Treatment or Research; expiry); see active permissions and revoke them; and see every request for their records with the requesting hospital, the decision and the reason.</p>
 ${figure("g1_patient", "Patient Portal: all requests for Ayesha's records with status, decision and reason.")}
@@ -383,6 +412,7 @@ ${compliance.map(([a, b, c]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td><td>${e
 <h2 style="margin-top:16px">13. Test results summary</h2>
 <table><thead><tr><th>Scenario</th><th>Request</th><th>Rules</th><th>Outcome</th><th>Records released</th></tr></thead><tbody>
 ${[["1. Successful ECG request", reqA], ["2. MRI outside consent", reqB], ["3. Unauthorized hospital H5", reqC], ["4. Revoked consent", reqD], ["5. Expired consent", reqE]].map(([n, r]) => `<tr><td>${esc(n)}</td><td class="mono">${esc(r.id)}<br>${esc(r.txRef)}</td><td>${r.rules.map((x) => `R${x.ruleId} ${x.result}`).join(", ")}</td><td>${esc(r.finalDecision?.outcome ?? r.status)}<div class="expl">${esc(r.finalDecision?.reason ?? "")}</div></td><td>${r.releasedRecordIds.length ? esc(r.releasedRecordIds.join(", ")) : "none"}</td></tr>`).join("")}
+<tr><td>5b. Consent revoked after approval</td><td class="mono">${esc(reqF.id)}<br>${esc(reqF.txRef)}</td><td>${reqF.rules.map((x) => `R${x.ruleId} ${x.result}`).join(", ")}; at release R3 FAIL</td><td>${esc(reqF.finalDecision?.outcome ?? reqF.status)}<div class="expl">${esc(reqF.finalDecision?.reason ?? "")}</div></td><td>none</td></tr>
 <tr><td>6. Ledger tampering</td><td>—</td><td>—</td><td>Verification failed at the altered event; passed again after restore</td><td>—</td></tr>
 </tbody></table>
 <p>All outcomes above come from the same algorithm, run on the data at the time of each request. No outcome is hard-coded.</p>

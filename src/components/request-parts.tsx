@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/form";
-import { granteeLabel } from "@/lib/contract";
+import { consentKey, granteeLabel } from "@/lib/contract";
 import { CATEGORY_LABEL, PURPOSE_LABEL } from "@/lib/rbac";
 import { useApp } from "@/lib/store";
 import type { Consent, DataRequest, MedicalRecord } from "@/lib/types";
@@ -159,6 +159,7 @@ export function ConsentSummary({ consent }: { consent: Consent }) {
         {consent.scope.map((c) => CATEGORY_LABEL[c]).join(", ")} for <b>{PURPOSE_LABEL[consent.purpose]}</b>.
       </div>
       <div className="text-xs text-slate-500">{consent.grantee.kind === "HOSPITAL" ? "Grantee: hospital" : "Grantee: designated professional"} · {consent.eventId} · {consent.txId}</div>
+      <div className="font-mono text-[10px] break-all text-slate-400">{consentKey(consent)}</div>
     </div>
   );
 }

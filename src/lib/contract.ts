@@ -17,7 +17,19 @@ export interface ContractEnv {
 }
 
 export function sameGrantee(a: Grantee, b: Grantee) {
-  return a.kind === b.kind && a.id === b.id;
+  return a.did === b.did;
+}
+
+// The consents[p][g] key shown in the UI and the ledger.
+export function consentKey(c: Pick<Consent, "patientDid" | "grantee">) {
+  return `consents[${c.patientDid}][${c.grantee.did}]`;
+}
+
+// Algorithm 08, line 2: require caller ∈ {p, guardian(p)}
+function requirePatientOrGuardian(fn: string, callerDid: string, patientDid: string, guardianDid: string | null) {
+  if (callerDid !== patientDid && (!guardianDid || callerDid !== guardianDid)) {
+    throw new Error(`${fn}(): caller ${callerDid} is neither the patient nor the patient's guardian.`);
+  }
 }
 
 export function granteeLabel(g: Grantee, users: User[], hospitals: Hospital[]) {
@@ -37,24 +49,28 @@ export function consentIsUsable(c: Consent, now: Date) {
 
 export interface GrantArgs {
   patientId: string;
+  patientDid: string;
   grantee: Grantee;
   scope: RecordCategory[];
   purpose: Purpose;
   expiry: Date;
 }
 
-export function grant(consents: Consent[], args: GrantArgs, env: { now: Date; patientRegistered: boolean; maxConsentDays: number }) {
+export function grant(consents: Consent[], args: GrantArgs, env: { now: Date; patientRegistered: boolean; maxConsentDays: number; callerDid: string; guardianDid: string | null }) {
   if (!env.patientRegistered) throw new Error("grant(): the patient must register a DID before granting consent.");
+  requirePatientOrGuardian("grant", env.callerDid, args.patientDid, env.guardianDid);
   if (!args.scope.length) throw new Error("grant(): select at least one record category.");
   if (args.expiry <= env.now) throw new Error("grant(): expiry must be in the future.");
   if (args.expiry.getTime() - env.now.getTime() > env.maxConsentDays * 86400000) {
     throw new Error(`grant(): the active policy limits consent to ${env.maxConsentDays} days.`);
   }
-  const superseded = consents.filter((c) => c.patientId === args.patientId && c.status === "ACTIVE" && sameGrantee(c.grantee, args.grantee));
+  // consents[p][g] ← {scope, purpose, exp}: the previous entry for (p, g) is replaced.
+  const superseded = consents.filter((c) => c.patientDid === args.patientDid && c.status === "ACTIVE" && sameGrantee(c.grantee, args.grantee));
   return {
     superseded,
     consent: {
       patientId: args.patientId,
+      patientDid: args.patientDid,
       grantee: args.grantee,
       scope: [...args.scope],
       purpose: args.purpose,
@@ -66,8 +82,11 @@ export function grant(consents: Consent[], args: GrantArgs, env: { now: Date; pa
 
 // ---------- revoke(patient, grantee) ----------
 
-export function revoke(consents: Consent[], patientId: string, grantee: Grantee) {
-  const active = consents.filter((c) => c.patientId === patientId && c.status === "ACTIVE" && sameGrantee(c.grantee, grantee));
+// The entry is marked REVOKED rather than deleted: for access it is equivalent to deleting it, and keeping it
+// lets Rule 3 report "revoked" and keeps the audit trail complete.
+export function revoke(consents: Consent[], patientDid: string, grantee: Grantee, env: { callerDid: string; guardianDid: string | null }) {
+  requirePatientOrGuardian("revoke", env.callerDid, patientDid, env.guardianDid);
+  const active = consents.filter((c) => c.patientDid === patientDid && c.status === "ACTIVE" && sameGrantee(c.grantee, grantee));
   if (!active.length) throw new Error("revoke(): there is no active consent for this grantee.");
   return active;
 }
@@ -76,7 +95,9 @@ export function revoke(consents: Consent[], patientId: string, grantee: Grantee)
 
 export interface CheckRequest {
   patientId: string;
-  grantee: { professionalId: string; hospitalId: string }; // the requesting professional and their hospital
+  patientDid: string;
+  // g: the requesting professional and their hospital, each with a DID
+  grantee: { professionalId: string; hospitalId: string; professionalDid: string; hospitalDid: string };
   recordTypes: RecordCategory[];
   purpose: Purpose;
   sourceHospitalId: string;
@@ -86,10 +107,10 @@ export interface CheckRequest {
 type Input = { label: string; value: string; ok?: boolean };
 export type RuleOutcome = { ruleId: RuleId; name: string; condition: string; inputs: Input[]; result: "PASS" | "FAIL"; reason: string };
 
-// consents.latestFor(patient, grantee): newest ACTIVE consent for the professional or their hospital, else the newest of any status.
-export function latestConsentFor(patientId: string, grantee: CheckRequest["grantee"], consents: Consent[]) {
+// consents[p][g]: newest ACTIVE consent for the professional's DID or their hospital's DID, else the newest of any status.
+export function latestConsentFor(patientDid: string, grantee: Pick<CheckRequest["grantee"], "professionalDid" | "hospitalDid">, consents: Consent[]) {
   const matching = consents
-    .filter((c) => c.patientId === patientId && ((c.grantee.kind === "HOSPITAL" && c.grantee.id === grantee.hospitalId) || (c.grantee.kind === "PROFESSIONAL" && c.grantee.id === grantee.professionalId)))
+    .filter((c) => c.patientDid === patientDid && (c.grantee.did === grantee.hospitalDid || c.grantee.did === grantee.professionalDid))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return matching.find((c) => c.status === "ACTIVE") ?? matching[0] ?? null;
 }
@@ -143,7 +164,7 @@ export function evaluateRule(ruleId: RuleId, req: CheckRequest, env: ContractEnv
     };
   }
 
-  const consent = latestConsentFor(req.patientId, req.grantee, consents);
+  const consent = latestConsentFor(req.patientDid, req.grantee, consents);
   const requesterName = users.find((u) => u.id === req.grantee.professionalId)?.name ?? req.grantee.professionalId;
 
   if (ruleId === 2) {
@@ -161,6 +182,7 @@ export function evaluateRule(ruleId: RuleId, req: CheckRequest, env: ContractEnv
     const outside = req.recordTypes.filter((c) => !consent.scope.includes(c));
     const inputs: Input[] = [
       { label: "Consent ID", value: consent.id, ok: true },
+      { label: "consents[p][g]", value: consentKey(consent), ok: true },
       { label: "consent.grantee", value: `${consent.grantee.kind === "HOSPITAL" ? "Hospital" : "Professional"} ${granteeLabel(consent.grantee, users, hospitals)}`, ok: true },
       { label: "Requested record types", value: req.recordTypes.join(", ") },
       { label: "consent.allowedScope", value: consent.scope.join(", ") },
@@ -187,7 +209,7 @@ export function evaluateRule(ruleId: RuleId, req: CheckRequest, env: ContractEnv
     { label: "request.purpose", value: PURPOSE_LABEL[req.purpose] },
     { label: "consent.purpose", value: PURPOSE_LABEL[consent.purpose], ok: purposeOk },
     { label: "consent.status", value: consent.status, ok: statusOk },
-    { label: "currentTime", value: fmtDateTime(now.toISOString()) },
+    { label: "now (block time)", value: fmtDateTime(now.toISOString()) },
     { label: "consent.expiry", value: fmtDateTime(consent.expiry), ok: expiryOk },
   ];
   const problems = [

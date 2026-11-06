@@ -3,7 +3,7 @@
 import { ArrowLeft, PackageOpen, ThumbsUp, Unlock } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { EmptyState, Explain, PageHeader, RoleGate, useAction } from "@/components/common";
+import { EmptyState, Explain, notify, PageHeader, RoleGate, useAction } from "@/components/common";
 import { FinalDecisionCard, RecordCard, RejectRequest, RequestSummary, RequestTimeline } from "@/components/request-parts";
 import { RulesPanel } from "@/components/rules-panel";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -99,7 +99,7 @@ export default function ExecutionPage() {
             {canRelease && (
               <RoleGate roles={["RECORDS_OFFICER"]} hospitalId={request.sourceHospitalId} purpose="release the records">
                 <div className="flex flex-wrap items-start gap-2">
-                  <Button disabled={busy} onClick={() => run(() => actions.releaseRecords(request.id), (r) => `${r.length} permitted record(s) released`)}>Release permitted records</Button>
+                  <Button disabled={busy} onClick={async () => { const r = await run(() => actions.releaseRecords(request.id)); if (r) notify(r.length ? `${r.length} permitted record(s) released` : "Release blocked: check() failed at the moment of access", r.length ? "success" : "error"); }}>Release permitted records</Button>
                   {request.status !== "COMMITTED" && <RejectRequest request={request} />}
                 </div>
                 {request.status === "CONSENSUS_FAILED" && <div className="mt-2 text-sm text-red-700">The last consensus attempt failed, so nothing was released. Bring validators back online and try again.</div>}

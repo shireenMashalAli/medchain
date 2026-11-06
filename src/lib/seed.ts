@@ -34,7 +34,7 @@ const USER_SEEDS: UserSeed[] = [
   { id: "u-aud", name: "Grace Mensah", role: "AUDITOR", hospitalId: null, licence: "AUD-0099" },
 ];
 
-const PATIENTS: Omit<Patient, "did" | "didDocument">[] = [
+const PATIENTS: Omit<Patient, "did" | "didDocument" | "guardianDid">[] = [
   { id: "PAT-001", name: "Ayesha Khan", dob: "1986-04-12", sex: "F" },
 ];
 
@@ -44,7 +44,7 @@ const RECORDS: MedicalRecord[] = [
   { id: "REC-001-MRI", patientId: "PAT-001", hospitalId: "H2", category: "MRI", title: "MRI brain without contrast", date: "2026-07-21", summary: "No acute intracranial abnormality.", values: [{ label: "Sequence", value: "T1/T2/FLAIR" }, { label: "Finding", value: "Normal study" }] },
 ];
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 // Initial consent from the project brief: City Hospital, LAB + ECG, Treatment, valid until the end of 31 December 2026 (local time).
 export const initialConsentExpiry = () => new Date(2026, 11, 31, 23, 59, 59).toISOString();
@@ -77,7 +77,8 @@ export async function buildSeedState(): Promise<AppState> {
   for (const p of PATIENTS) {
     const did = await patientDid(p.id);
     const registered = true;
-    patients.push({ ...p, did: registered ? did : null, didDocument: registered ? await makeDidDocument(did, did) : null });
+    // Ayesha is an adult, so she has no guardian; the contract still accepts a guardian DID when one is set.
+    patients.push({ ...p, did: registered ? did : null, didDocument: registered ? await makeDidDocument(did, did) : null, guardianDid: null });
   }
 
   const code = generateContractCode("1.0.0", DEFAULT_POLICY);
@@ -108,7 +109,8 @@ export async function buildSeedState(): Promise<AppState> {
       {
         id: "CON-0001",
         patientId: "PAT-001",
-        grantee: { kind: "HOSPITAL", id: "H1" },
+        patientDid: patients[0].did!,
+        grantee: { kind: "HOSPITAL", id: "H1", did: hospitals[0].did },
         scope: ["LAB", "ECG"],
         purpose: "TREATMENT",
         expiry: initialConsentExpiry(),

@@ -14,7 +14,7 @@ import { QUORUM, simulatePbft, VALIDATORS } from "./pbft";
 import { CATEGORY_LABEL, hasPermission, PERMISSION_LABEL, PURPOSE_LABEL, ROLE_LABEL } from "./rbac";
 import { buildSeedState, SCHEMA_VERSION } from "./seed";
 import type {
-  AppState, Block, Consent, ContractVersion, DataRequest, EventKind, EventSubject, FinalDecision, Grantee, GuidedState, HospitalId,
+  AppState, Block, Consent, ContractVersion, DataRequest, EventKind, EventSubject, FinalDecision, Grantee, GranteeRef, GuidedState, HospitalId,
   LedgerEvent, NodeStatus, Permission, PbftRun, Policy, Proposal, ProposalType, Purpose, RecordCategory, RequestStatus,
   ReviewCheck, RuleEvaluation, RuleId, User, ValidatorId, Verification, Vote,
 } from "./types";
@@ -159,14 +159,27 @@ function policyOf(d: AppState): Policy {
   return d.contracts.find((c) => c.version === d.activeContractVersion)!.policy;
 }
 
+// g in Algorithm 08 is a DID: a hospital's DID or a professional's DID.
+function resolveGrantee(d: AppState, ref: GranteeRef): Grantee {
+  const did = ref.kind === "HOSPITAL" ? d.hospitals.find((h) => h.id === ref.id)?.did : d.users.find((u) => u.id === ref.id)?.did;
+  if (!did) throw new Error(`Unknown grantee ${ref.id}.`);
+  return { ...ref, did };
+}
+
 function contractEnv(d: AppState, now: Date): ContractEnv {
   return { hospitals: d.hospitals, users: d.users, consents: d.consents, verifications: d.verifications, authentications: d.authentications, now };
 }
 
-function checkRequestOf(req: DataRequest, processor: User): CheckRequest {
+function checkRequestOf(d: AppState, req: DataRequest, processor: User): CheckRequest {
   return {
     patientId: req.patientId,
-    grantee: { professionalId: req.requesterId, hospitalId: req.requestingHospitalId },
+    patientDid: d.patients.find((p) => p.id === req.patientId)!.did ?? "",
+    grantee: {
+      professionalId: req.requesterId,
+      hospitalId: req.requestingHospitalId,
+      professionalDid: d.users.find((u) => u.id === req.requesterId)!.did,
+      hospitalDid: d.hospitals.find((h) => h.id === req.requestingHospitalId)!.did,
+    },
     recordTypes: req.categories,
     purpose: req.purpose,
     sourceHospitalId: req.sourceHospitalId,
@@ -344,7 +357,7 @@ async function initialiseState(): Promise<AppState> {
 
 export interface NewConsentInput {
   patientId: string;
-  grantees: Grantee[];
+  grantees: GranteeRef[];
   scope: RecordCategory[];
   purpose: Purpose;
   expiry: string;
@@ -447,14 +460,6 @@ function useStoreValue() {
       const p = d.patients.find((x) => x.id === patientId)!;
       return { name: p.name, did: p.did ?? "", role: "Patient", hospitalId: null };
     };
-    const assertPatientSession = (d: AppState, ctx: Ctx, patientId: string) => {
-      if (ctx.session.role !== "PATIENT") throw new Error("Only the patient can manage their consent. Sign in as a patient.");
-      if (ctx.session.patientId && ctx.session.patientId !== patientId) {
-        const owner = d.patients.find((p) => p.id === patientId)!;
-        const hasOwnLogin = d.users.some((u) => u.patientId === patientId);
-        if (hasOwnLogin) throw new Error(`${ctx.session.name} cannot manage ${owner.name}'s consent.`);
-      }
-    };
 
     const evaluateOne = (requestId: string, ruleId: RuleId) =>
       commit((d, ctx) => {
@@ -463,7 +468,7 @@ function useStoreValue() {
         if (req.status === "CONSENT_CHECKED") startExecution(d, ctx, req);
         if (req.status !== "CONTRACT_PENDING") throw new Error("The source hospital must complete its verification first.");
         if (req.rules.length !== ruleId - 1) throw new Error(`Run Rule ${req.rules.length + 1} first — rules execute in order.`);
-        return recordRule(d, ctx, req, evaluateRule(ruleId, checkRequestOf(req, ctx.session), contractEnv(d, ctx.now)));
+        return recordRule(d, ctx, req, evaluateRule(ruleId, checkRequestOf(d, req, ctx.session), contractEnv(d, ctx.now)));
       });
 
     const advance = (runId: string) =>
@@ -571,13 +576,17 @@ function useStoreValue() {
       // Algorithm 08 grant(): one consent per grantee.
       grantConsent: (input: NewConsentInput) =>
         commit((d, ctx) => {
-          assertPatientSession(d, ctx, input.patientId);
           if (!input.grantees.length) throw new Error("Select at least one hospital or professional.");
           const p = d.patients.find((x) => x.id === input.patientId)!;
-          const actor = patientActor(d, input.patientId);
+          const actor = actorOf(ctx.session); // the caller: the patient, or their guardian
           const created: Consent[] = [];
-          for (const grantee of input.grantees) {
-            const res = grant(d.consents, { patientId: p.id, grantee, scope: input.scope, purpose: input.purpose, expiry: new Date(input.expiry) }, { now: ctx.now, patientRegistered: !!p.did, maxConsentDays: policyOf(d).maxConsentDays });
+          for (const ref of input.grantees) {
+            const grantee = resolveGrantee(d, ref);
+            const res = grant(
+              d.consents,
+              { patientId: p.id, patientDid: p.did ?? "", grantee, scope: input.scope, purpose: input.purpose, expiry: new Date(input.expiry) },
+              { now: ctx.now, patientRegistered: !!p.did, maxConsentDays: policyOf(d).maxConsentDays, callerDid: ctx.session.did, guardianDid: p.guardianDid },
+            );
             for (const old of res.superseded) {
               old.status = "SUPERSEDED";
               ctx.recordLedgerEvent({ actor, action: "CONSENT_SUPERSEDED", result: "SUPERSEDED", explanation: `Consent ${old.id} for ${granteeLabel(grantee, d.users, d.hospitals)} was replaced by a newer grant.`, details: { consentId: old.id } });
@@ -585,8 +594,8 @@ function useStoreValue() {
             const id = `CON-${pad(++d.counters.consent)}`;
             const ev = ctx.recordLedgerEvent({
               actor, action: "CONSENT_GRANTED", result: "ACTIVE",
-              explanation: `grant(${p.id}, ${grantee.id}, [${input.scope.join(", ")}], ${input.purpose}, ${input.expiry.slice(0, 10)}): ${p.name} allowed ${granteeLabel(grantee, d.users, d.hospitals)} to access ${input.scope.map((c) => CATEGORY_LABEL[c]).join(", ")} for ${PURPOSE_LABEL[input.purpose]}.`,
-              details: { consentId: id, grantee, scope: input.scope, purpose: input.purpose, expiry: res.consent.expiry },
+              explanation: `grant(${p.did}, ${grantee.did}, [${input.scope.join(", ")}], ${input.purpose}, ${input.expiry.slice(0, 10)}): ${p.name} allowed ${granteeLabel(grantee, d.users, d.hospitals)} to access ${input.scope.map((c) => CATEGORY_LABEL[c]).join(", ")} for ${PURPOSE_LABEL[input.purpose]}. Stored as consents[p][g].`,
+              details: { consentId: id, key: `consents[${p.did}][${grantee.did}]`, grantee, scope: input.scope, purpose: input.purpose, expiry: res.consent.expiry, caller: ctx.session.did },
             });
             const consent: Consent = { id, ...res.consent, createdAt: ev.timestamp, eventId: ev.id, txId: ev.txId };
             d.consents.push(consent);
@@ -596,19 +605,19 @@ function useStoreValue() {
         }),
 
       // Algorithm 08 revoke(patient, grantee).
-      revokeConsent: (patientId: string, grantee: Grantee) =>
+      revokeConsent: (patientId: string, ref: GranteeRef) =>
         commit((d, ctx) => {
-          assertPatientSession(d, ctx, patientId);
-          const revoked = revoke(d.consents, patientId, grantee);
           const p = d.patients.find((x) => x.id === patientId)!;
+          const grantee = resolveGrantee(d, ref);
+          const revoked = revoke(d.consents, p.did ?? "", grantee, { callerDid: ctx.session.did, guardianDid: p.guardianDid });
           for (const c of revoked) {
             c.status = "REVOKED";
             c.revokedAt = ctx.now.toISOString();
           }
           ctx.recordLedgerEvent({
-            actor: patientActor(d, patientId), action: "CONSENT_REVOKED", result: "REVOKED",
-            explanation: `revoke(${patientId}, ${grantee.id}): ${p.name} withdrew permission for ${granteeLabel(grantee, d.users, d.hospitals)}. Later contract checks will fail Rule 3.`,
-            details: { consentIds: revoked.map((c) => c.id), grantee },
+            actor: actorOf(ctx.session), action: "CONSENT_REVOKED", result: "REVOKED",
+            explanation: `revoke(${p.did}, ${grantee.did}): ${p.name}'s permission for ${granteeLabel(grantee, d.users, d.hospitals)} withdrawn. Every later check() for this pair fails Rule 3.`,
+            details: { consentIds: revoked.map((c) => c.id), key: `consents[${p.did}][${grantee.did}]`, grantee, caller: ctx.session.did },
           });
           return revoked;
         }),
@@ -684,7 +693,8 @@ function useStoreValue() {
           const physician = d.users.find((u) => u.id === req.requesterId)!;
           const held = d.records.filter((r) => r.patientId === req.patientId && r.hospitalId === req.sourceHospitalId);
           const missing = req.categories.filter((c) => !held.some((r) => r.category === c));
-          const consent = latestConsentFor(req.patientId, { professionalId: req.requesterId, hospitalId: req.requestingHospitalId }, d.consents);
+          const cr = checkRequestOf(d, req, ctx.session);
+          const consent = latestConsentFor(cr.patientDid, cr.grantee, d.consents);
           const consentSummary = !consent
             ? `No consent from ${req.patientId} to ${req.requestingHospitalId} or the requesting physician was found.`
             : `Found ${consent.id}: ${consent.status}, scope ${consent.scope.join("/")}, purpose ${consent.purpose}, ${consentIsUsable(consent, ctx.now) ? "in date" : "not usable (expired or inactive)"}.`;
@@ -736,7 +746,7 @@ function useStoreValue() {
           if (req.decision) throw new Error("The contract has already reached a decision for this request.");
           if (req.status === "CONSENT_CHECKED") startExecution(d, ctx, req);
           if (req.status !== "CONTRACT_PENDING") throw new Error("The source hospital must complete its verification first.");
-          const result = check(checkRequestOf(req, ctx.session), contractEnv(d, ctx.now), req.rules.length);
+          const result = check(checkRequestOf(d, req, ctx.session), contractEnv(d, ctx.now), req.rules.length);
           return result.rules.map((r) => recordRule(d, ctx, req, r));
         }),
 
@@ -762,13 +772,30 @@ function useStoreValue() {
           setStatus(req, "HOSPITAL_APPROVED", ctx.session.name, ev.id);
         }),
 
-      // Release: only after the contract approved and the source hospital approved.
+      // Release: only after the contract approved and the source hospital approved, and
+      // Algorithm 08 line 6 — this access path calls check() again first, so a consent revoked or
+      // expired after approval still blocks the release.
       releaseRecords: (id: string) =>
         commit((d, ctx) => {
           const req = findReq(d, id);
           if (req.status !== "HOSPITAL_APPROVED") throw new Error("Records are released only after all contract rules pass and the source hospital approves.");
           requireOfficerAt(ctx.session, req.sourceHospitalId, "record:release");
-          finalize(d, ctx, req, "RELEASED", "All three contract rules passed and the source hospital approved.", actorOf(ctx.session));
+          const recheck = check(checkRequestOf(d, req, ctx.session), contractEnv(d, ctx.now));
+          const failed = recheck.rules.find((r) => r.result === "FAIL");
+          ctx.recordLedgerEvent({
+            actor: CONTRACT_ACTOR, hospitalId: req.sourceHospitalId, requestId: req.id, txId: req.txRef,
+            action: "ACCESS_CHECK_AT_RELEASE", result: recheck.decision === "APPROVE" ? "PASS" : "FAIL",
+            explanation: recheck.decision === "APPROVE"
+              ? "check() re-run at the moment of access: Rules 1–3 still pass, so the release may go ahead."
+              : `check() re-run at the moment of access failed Rule ${recheck.deniedByRule}: ${failed?.reason.replace(/^Denied: /, "") ?? ""}`,
+            details: { rules: recheck.rules.map((r) => ({ rule: r.ruleId, result: r.result, reason: r.reason })) },
+          });
+          if (recheck.decision === "DENY") {
+            req.deniedByRule = recheck.deniedByRule;
+            finalize(d, ctx, req, "DENIED", `At release, check() failed Rule ${recheck.deniedByRule}: ${failed?.reason.replace(/^Denied: /, "") ?? ""}`, CONTRACT_ACTOR);
+            return [];
+          }
+          finalize(d, ctx, req, "RELEASED", "All three contract rules passed, the source hospital approved, and check() passed again at release.", actorOf(ctx.session));
           return d.records.filter((r) => req.releasedRecordIds.includes(r.id));
         }),
 

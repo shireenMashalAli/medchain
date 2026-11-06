@@ -30,6 +30,8 @@ Open http://localhost:3000 (Node.js 20.9+). Use a window at least 1200px wide so
 
 A failed rule denies access. There is no override.
 
+Matching the lecture definition: `grant` and `revoke` require the caller to be the patient or their guardian (`caller ∈ {p, guardian(p)}`); consents are keyed by DIDs as `consents[p][g]`; and every access path calls `check()` first — it runs at the contract step and again at the moment of release, so a consent revoked after approval still blocks the release (`ACCESS_CHECK_AT_RELEASE`).
+
 ## Sample data
 
 - Patient: Ayesha Khan (PAT-001), with LAB, ECG and MRI records at H2 General Hospital.

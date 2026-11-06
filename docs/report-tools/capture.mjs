@@ -227,6 +227,31 @@ await page.evaluate(() => {
 });
 await sleep(1100);
 
+// ---------- CASE F: consent revoked after approval (Algorithm 08 line 6: check() at every access) ----------
+await click("Sign in as Ayesha Khan");
+await click("Grant consent", { exact: true });
+await nav("/");
+await click("Start a new request");
+await click("Sign in as Dr. Ahmed Raza");
+await setCategories(["ECG"]);
+await click("Submit request");
+await hospitalSteps();
+await click("Run All Rules");
+await click("Approve request", { exact: true });
+await scrollToText("main h2", "Step 5");
+await capture("r1_approved", "Contract approved and hospital approved; records not yet released");
+await nav("/patient");
+await click("Sign in as Ayesha Khan");
+await click("Revoke", { exact: true });
+await scrollToText("main h3", "Active permissions", 90);
+await capture("r2_revoked", "Before the release, Ayesha revokes City Hospital: revoke(p, g)");
+await nav("/");
+await click("Sign in as Sara Malik");
+await click("Release permitted records", { exact: true });
+await scrollToText("main h2", "Step 6");
+await capture("r3_blocked", "Release re-runs check(): Rule 3 now fails, so access is denied and nothing is released");
+await nav("/patient");
+
 // ---------- Patient notification ----------
 await page.evaluate(() => window.scrollTo(0, 0));
 await capture("g1_patient", "Patient Portal: every request for Ayesha's records with the decision and reason");
@@ -262,7 +287,13 @@ await click("Restore original");
 await click("Verify Ledger");
 await capture("h3_restored", "Original value restored: chain intact again");
 
-// expanded event with hash inspector
+// expanded event with hash inspector (search first: the table shows the newest 75 events)
+await page.evaluate(() => {
+  const input = document.querySelector('main input[placeholder^="Search"]');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "MEDICAL_RECORD_RELEASED");
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await sleep(600);
 await page.evaluate(() => {
   const row = [...document.querySelectorAll("main table tbody tr")].find((r) => r.textContent.includes("MEDICAL_RECORD_RELEASED"));
   row.click();

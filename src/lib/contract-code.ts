@@ -30,7 +30,7 @@ export const RULES = [
 // Implementation map shown in Contract Studio, so readers can find the real code.
 export const IMPLEMENTATION = [
   { fn: "grant(patient, grantee, scope, purpose, expiry)", file: "src/lib/contract.ts", symbol: "grant()" },
-  { fn: "check(patient, grantee, record_type)", file: "src/lib/contract.ts", symbol: "check() → evaluateRule(1..3)" },
+  { fn: "check(patient, grantee, record_type)", file: "src/lib/contract.ts", symbol: "check() → evaluateRule(1..3); re-run at release" },
   { fn: "revoke(patient, grantee)", file: "src/lib/contract.ts", symbol: "revoke()" },
 ];
 
@@ -83,35 +83,41 @@ export function generateContractCode(version: string, policy: Policy, opts: { ed
   param maxConsentDays    = ${policy.maxConsentDays};
   param emergencyPathway  = ${policy.emergencyPathway};
 
-  struct Consent { patient; grantee; allowedScope[]; purpose; expiry; status; }
+  // p = patient DID, g = grantee DID (hospital or professional), now = block time
+  mapping consents[p][g] -> Consent { allowedScope[]; purpose; expiry; status; }
 
-  // Algorithm 08 — grant(patient, grantee, scope, purpose, expiry)
-  function grant(patient, grantee, scope, purpose, expiry) {
-    require(caller == patient && did.isRegistered(patient));
-    require(scope.length > 0);
-    require(now < expiry && expiry <= now + days(maxConsentDays));
-    for (c in consents.active(patient, grantee)) c.status = SUPERSEDED;
-    consents.add(Consent(patient, grantee, scope, purpose, expiry, ACTIVE));
-    emit ConsentGranted(patient, grantee, scope, purpose, expiry);
+  // Algorithm 08 — grant(p, g, scope, purpose, exp)
+  function grant(p, g, scope, purpose, exp) {
+    require(caller == p || caller == guardian(p));                      // line 2
+    require(did.isRegistered(p) && scope.length > 0);
+    require(now < exp && exp <= now + days(maxConsentDays));
+    consents[p][g] = Consent(scope, purpose, exp, ACTIVE);              // line 3 (replaces the previous entry)
+    emit ConsentGranted(p, g, scope, purpose, exp);
   }
 
-  // Algorithm 08 — check(patient, grantee, record_type)
-  // grantee = requesting professional and their hospital; the request supplies purpose and processor.
-  function check(patient, grantee, record_type) returns (Decision) {
-    consent = consents.latestFor(patient, grantee);   // newest ACTIVE, else newest of any status
-    if (!R1_IdentityAndHospital(grantee, processor))                return deny(R1);
-    if (!R2_ConsentAndScope(consent, grantee, record_type))         return deny(R2);
-    if (!R3_PurposeExpiryRevocation(consent, request.purpose, now)) return deny(R3);${policy.emergencyPathway ? "\n    if (!E1_EmergencyPathway(request))                              return deny(E1);" : ""}
+  // Algorithm 08 — check(p, g, type): type in scope && now < exp     // line 4
+  // g = the requesting professional and their hospital; the request supplies purpose and processor.
+  function check(p, g, type) returns (Decision) {
+    consent = consents[p][g];                                           // newest ACTIVE entry, else the latest one
+    if (!R1_IdentityAndHospital(g, processor))                  return deny(R1);
+    if (!R2_ConsentAndScope(consent, g, type))                  return deny(R2);   // type in scope
+    if (!R3_PurposeExpiryRevocation(consent, request.purpose, now)) return deny(R3); // now < exp, not revoked${policy.emergencyPathway ? "\n    if (!E1_EmergencyPathway(request))                              return deny(E1);" : ""}
     emit ContractDecision(request.id, APPROVE);
-    return APPROVE;   // eligible: consensus, then the source hospital's final approval
+    return APPROVE;
   }
 
-  // Algorithm 08 — revoke(patient, grantee)
-  function revoke(patient, grantee) {
-    require(caller == patient);
-    require(consents.active(patient, grantee).length > 0);
-    for (c in consents.active(patient, grantee)) { c.status = REVOKED; c.revokedAt = now; }
-    emit ConsentRevoked(patient, grantee, now);
+  // Algorithm 08 — revoke(p, g)                                        // line 5
+  function revoke(p, g) {
+    require(caller == p || caller == guardian(p));
+    consents[p][g].status = REVOKED;   // equivalent to delete for access; kept so Rule 3 can say "revoked" and the audit trail stays complete
+    emit ConsentRevoked(p, g, now);
+  }
+
+  // Algorithm 08 — line 6: every access path calls check() first
+  function releaseRecords(request) {
+    require(request.contractDecision == APPROVE && request.hospitalApproved);
+    require(check(request.patient, request.grantee, request.recordTypes) == APPROVE);   // re-checked at the moment of access
+    release(records where type in request.recordTypes);
   }
 
   // A failed rule always denies. There is no override function.

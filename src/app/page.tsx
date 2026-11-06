@@ -3,7 +3,7 @@
 import { CheckCircle2, Circle, LogIn, RotateCcw, Send, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { useAction } from "@/components/common";
+import { notify, useAction } from "@/components/common";
 import { ConsentSummary, FinalDecisionCard, RecordCard, RejectRequest, RequestSummary, ReviewChecks } from "@/components/request-parts";
 import { RulesPanel } from "@/components/rules-panel";
 import { Badge } from "@/components/ui/badge";
@@ -103,7 +103,9 @@ export default function RequestWorkflowPage() {
   const s3: StepState = !request ? "waiting" : request.status === "REJECTED" && !request.review ? "failed" : past(request, "UNDER_REVIEW") || request.review ? "done" : "active";
   const s4: StepState = !request || !request.review ? "waiting" : request.decision === "DENY" ? "failed" : request.decision === "APPROVE" ? "done" : request.status === "REJECTED" ? "skipped" : "active";
   const s5: StepState = !request || request.decision !== "APPROVE" ? (request?.decision === "DENY" ? "skipped" : "waiting") : request.status === "REJECTED" ? "failed" : request.status === "CONTRACT_APPROVED" ? "active" : "done";
-  const s6: StepState = !request || !["HOSPITAL_APPROVED", "COMMITTED", "CONSENSUS_FAILED", "RELEASED", "PBFT_IN_PROGRESS"].includes(request.status) ? (request && ["DENIED", "REJECTED"].includes(request.status) ? "skipped" : "waiting") : request.status === "RELEASED" ? "done" : request.status === "CONSENSUS_FAILED" ? "failed" : "active";
+  // Step 6 fails if check() is re-run at release and no longer passes (e.g. consent revoked after approval).
+  const deniedAtRelease = request?.status === "DENIED" && request.decision === "APPROVE";
+  const s6: StepState = !request ? "waiting" : request.status === "RELEASED" ? "done" : deniedAtRelease ? "failed" : request.status === "HOSPITAL_APPROVED" ? "active" : ["DENIED", "REJECTED"].includes(request.status) ? "skipped" : "waiting";
 
   const officerSignedIn = !!officer && session.id === officer.id;
 
@@ -260,11 +262,11 @@ export default function RequestWorkflowPage() {
       <Step n={6} title="Access decision and record release" who={`${officer?.name ?? "Records officer"}, then the requesting hospital receives the records`} state={s6}>
         {request && officer && (
           <div className="space-y-3">
-            {request.status !== "RELEASED" && (
+            {request.status === "HOSPITAL_APPROVED" && (
               <>
                 <ActAs user={officer} why="The source hospital releases the records." />
-                <p className="text-sm text-slate-600">Contract passed and hospital approved, so only the approved categories are released.</p>
-                <Button disabled={busy || !officerSignedIn} onClick={() => run(() => actions.releaseRecords(request.id), (r) => `${r.length} record(s) released`)}>Release permitted records</Button>
+                <p className="text-sm text-slate-600">Contract passed and hospital approved. Before releasing, check() runs again (Algorithm 08, line 6: every access path calls check() first), then only the approved categories are released.</p>
+                <Button disabled={busy || !officerSignedIn} onClick={async () => { const r = await run(() => actions.releaseRecords(request.id)); if (r) notify(r.length ? `${r.length} permitted record(s) released` : "Release blocked: check() failed at the moment of access", r.length ? "success" : "error"); }}>Release permitted records</Button>
               </>
             )}
             <FinalDecisionCard request={request} />

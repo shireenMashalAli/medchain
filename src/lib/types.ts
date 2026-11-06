@@ -85,6 +85,7 @@ export interface Patient {
   sex: "F" | "M";
   did: string | null;
   didDocument: DidDocument | null;
+  guardianDid: string | null; // legal guardian who may also grant/revoke (Algorithm 08, line 2)
 }
 
 export interface DidDocument {
@@ -107,15 +108,19 @@ export interface MedicalRecord {
 
 export type ConsentStatus = "ACTIVE" | "REVOKED" | "SUPERSEDED";
 
-// A grantee is either a whole hospital or one designated professional.
+// A grantee is either a whole hospital or one designated professional, identified by its DID (g in Algorithm 08).
 export interface Grantee {
   kind: "HOSPITAL" | "PROFESSIONAL";
-  id: string; // HospitalId or user id
+  id: string; // HospitalId or user id, for display
+  did: string;
 }
+export type GranteeRef = Omit<Grantee, "did">;
 
+// consents[p][g]: one ACTIVE entry per (patient DID, grantee DID).
 export interface Consent {
   id: string;
   patientId: string;
+  patientDid: string;
   grantee: Grantee;
   scope: RecordCategory[];
   purpose: Purpose;

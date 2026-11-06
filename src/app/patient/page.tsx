@@ -12,7 +12,7 @@ import { Checkbox, Input, Label, Select } from "@/components/ui/form";
 import { granteeLabel } from "@/lib/contract";
 import { CATEGORIES, CATEGORY_LABEL, PURPOSE_LABEL, purposesFor } from "@/lib/rbac";
 import { useApp } from "@/lib/store";
-import type { Grantee, Purpose, RecordCategory } from "@/lib/types";
+import type { GranteeRef, Purpose, RecordCategory } from "@/lib/types";
 import { addDays, fmtDate, fmtDateTime } from "@/lib/utils";
 
 function toDateInput(d: Date) {
@@ -48,7 +48,7 @@ export default function PatientPortalPage() {
 
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const isPatientSession = session.role === "PATIENT";
-  const grantees: Grantee[] = [...hospitals.map((id) => ({ kind: "HOSPITAL" as const, id })), ...professionals.map((id) => ({ kind: "PROFESSIONAL" as const, id }))];
+  const grantees: GranteeRef[] = [...hospitals.map((id) => ({ kind: "HOSPITAL" as const, id })), ...professionals.map((id) => ({ kind: "PROFESSIONAL" as const, id }))];
 
   return (
     <div className="space-y-6">
