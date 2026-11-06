@@ -47,7 +47,7 @@ export default function PatientPortalPage() {
   );
 
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
-  const isPatientSession = session.role === "PATIENT";
+  const isPatientSession = session.role === "PATIENT" && !!state.authentications[session.id];
   const grantees: GranteeRef[] = [...hospitals.map((id) => ({ kind: "HOSPITAL" as const, id })), ...professionals.map((id) => ({ kind: "PROFESSIONAL" as const, id }))];
 
   return (
@@ -65,7 +65,7 @@ export default function PatientPortalPage() {
         }
       />
 
-      {!isPatientSession && <RoleGate roles={["PATIENT"]} purpose="manage consent" />}
+      <RoleGate roles={["PATIENT"]} purpose="manage consent" />
 
       {requests.length > 0 && (
         <Card className="border-blue-200">
@@ -95,6 +95,39 @@ export default function PatientPortalPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Active permissions</CardTitle>
+          <CardDescription>The smart contract reads these on every request. Revoking calls revoke(patient, grantee) and takes effect for every later check.</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          {active.length === 0 ? (
+            <div className="p-5"><EmptyState icon={ShieldOff} title="No active permissions">Grant consent above to let a hospital or professional request records.</EmptyState></div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-4 py-2">Consent</th><th className="px-4 py-2">Grantee</th><th className="px-4 py-2">Records</th><th className="px-4 py-2">Purpose</th><th className="px-4 py-2">Expiry</th><th className="px-4 py-2">Status</th><th className="px-4 py-2" /></tr></thead>
+              <tbody>
+                {active.map((c) => (
+                  <tr key={c.id} className="border-t border-slate-100">
+                    <td className="px-4 py-2 font-mono text-xs">{c.id}</td>
+                    <td className="px-4 py-2">{granteeLabel(c.grantee, state.users, state.hospitals)}<div className="text-xs text-slate-500">{c.grantee.kind === "HOSPITAL" ? "Hospital" : "Designated professional"}</div></td>
+                    <td className="px-4 py-2">{c.scope.join(", ")}</td>
+                    <td className="px-4 py-2">{PURPOSE_LABEL[c.purpose]}</td>
+                    <td className="px-4 py-2 text-xs">{fmtDateTime(c.expiry)}</td>
+                    <td className="px-4 py-2"><ConsentStatusBadge consent={c} /></td>
+                    <td className="px-4 py-2 text-right">
+                      <Button size="sm" variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" disabled={busy || !isPatientSession} onClick={() => run(() => actions.revokeConsent(patientId, c.grantee), `Permission for ${granteeLabel(c.grantee, state.users, state.hospitals)} revoked`)}>
+                        Revoke
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card>
@@ -213,39 +246,6 @@ export default function PatientPortalPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Active permissions</CardTitle>
-          <CardDescription>The smart contract reads these on every request. Revoking calls revoke(patient, grantee) and takes effect for every later check.</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto p-0">
-          {active.length === 0 ? (
-            <div className="p-5"><EmptyState icon={ShieldOff} title="No active permissions">Grant consent above to let a hospital or professional request records.</EmptyState></div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-4 py-2">Consent</th><th className="px-4 py-2">Grantee</th><th className="px-4 py-2">Records</th><th className="px-4 py-2">Purpose</th><th className="px-4 py-2">Expiry</th><th className="px-4 py-2">Status</th><th className="px-4 py-2" /></tr></thead>
-              <tbody>
-                {active.map((c) => (
-                  <tr key={c.id} className="border-t border-slate-100">
-                    <td className="px-4 py-2 font-mono text-xs">{c.id}</td>
-                    <td className="px-4 py-2">{granteeLabel(c.grantee, state.users, state.hospitals)}<div className="text-xs text-slate-500">{c.grantee.kind === "HOSPITAL" ? "Hospital" : "Designated professional"}</div></td>
-                    <td className="px-4 py-2">{c.scope.join(", ")}</td>
-                    <td className="px-4 py-2">{PURPOSE_LABEL[c.purpose]}</td>
-                    <td className="px-4 py-2 text-xs">{fmtDateTime(c.expiry)}</td>
-                    <td className="px-4 py-2"><ConsentStatusBadge consent={c} /></td>
-                    <td className="px-4 py-2 text-right">
-                      <Button size="sm" variant="outline" className="border-red-200 text-red-700 hover:bg-red-50" disabled={busy || !isPatientSession} onClick={() => run(() => actions.revokeConsent(patientId, c.grantee), `Permission for ${granteeLabel(c.grantee, state.users, state.hospitals)} revoked`)}>
-                        Revoke
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

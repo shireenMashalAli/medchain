@@ -185,14 +185,15 @@ export function PassFail({ pass, label }: { pass: boolean; label?: string }) {
 // Shows who the current session is and, if they lack the needed role, offers a one-click switch.
 export function RoleGate({ roles, hospitalId, purpose, children }: { roles: Role[]; hospitalId?: HospitalId; purpose: string; children?: React.ReactNode }) {
   const { session, state, actions } = useApp();
-  const ok = roles.includes(session.role) && (!hospitalId || session.hospitalId === hospitalId);
+  // The right role is not enough: the user must also have signed in (authentication).
+  const ok = roles.includes(session.role) && (!hospitalId || session.hospitalId === hospitalId) && !!state.authentications[session.id];
   if (ok) return <>{children}</>;
   const candidates = state.users.filter((u) => roles.includes(u.role) && (!hospitalId || u.hospitalId === hospitalId));
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
       <UserCog className="size-4 shrink-0" />
       <span className="flex-1">
-        You are signed in as <b>{session.name}</b> ({ROLE_LABEL[session.role]}). To {purpose}, sign in as a{" "}
+        {state.authentications[session.id] ? <>You are signed in as <b>{session.name}</b> ({ROLE_LABEL[session.role]}).</> : <>Nobody is signed in yet.</>} To {purpose}, sign in as a{" "}
         {roles.map((r) => ROLE_LABEL[r]).join(" / ")}
         {hospitalId ? ` at ${hospitalId}` : ""}. (RBAC)
       </span>

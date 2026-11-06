@@ -576,6 +576,7 @@ function useStoreValue() {
       // Algorithm 08 grant(): one consent per grantee.
       grantConsent: (input: NewConsentInput) =>
         commit((d, ctx) => {
+          if (!d.authentications[ctx.session.id]) throw new Error("Sign in before changing consent.");
           if (!input.grantees.length) throw new Error("Select at least one hospital or professional.");
           const p = d.patients.find((x) => x.id === input.patientId)!;
           const actor = actorOf(ctx.session); // the caller: the patient, or their guardian
@@ -607,6 +608,7 @@ function useStoreValue() {
       // Algorithm 08 revoke(patient, grantee).
       revokeConsent: (patientId: string, ref: GranteeRef) =>
         commit((d, ctx) => {
+          if (!d.authentications[ctx.session.id]) throw new Error("Sign in before changing consent.");
           const p = d.patients.find((x) => x.id === patientId)!;
           const grantee = resolveGrantee(d, ref);
           const revoked = revoke(d.consents, p.did ?? "", grantee, { callerDid: ctx.session.did, guardianDid: p.guardianDid });
